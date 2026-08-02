@@ -15,6 +15,8 @@ const SCHEMA = {
   bs: [
     { key: "cash", label: "現金及び預金", group: "資産",
       aliases: ["現金", "現金預金", "現金・預金", "現金及び現金同等物", "現預金"] },
+    { key: "cashExcluded", label: "現金同等物に含めない預金", group: "資産", carveOut: true,
+      aliases: ["3か月超の定期預金", "3ヶ月超の定期預金", "長期性預金", "現金同等物から除く預金"] },
     { key: "deposits", label: "預け金", group: "資産",
       aliases: ["預け金勘定", "関係会社預け金", "CMS預け金", "親会社預け金"] },
     { key: "receivables", label: "売上債権", group: "資産",
@@ -89,6 +91,8 @@ const SCHEMA = {
       aliases: ["利息の支払額実績"] },
     { key: "taxPaid", label: "法人税等の支払額(実額)", absolute: true, group: "実際の受払額",
       aliases: ["法人税等の納付額", "法人税等の支払額実績"] },
+    { key: "fxEffect", label: "現金及び現金同等物に係る換算差額", group: "その他",
+      aliases: ["為替換算差額", "現金及び現金同等物に係る為替変動の影響"] },
   ],
 
   // SS: 当期のみ(すべて正の値で入力)

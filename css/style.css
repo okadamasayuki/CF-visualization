@@ -449,6 +449,22 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .dropzone-compact { padding: 20px 16px; }
 
+.policy-form { display: grid; gap: 6px; margin-bottom: 4px; }
+.policy-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.policy-option:hover { background: var(--accent-wash); }
+.policy-option input { margin: 0; }
+
+.deriv-formula.is-variant { margin-top: 4px; }
+
 /* ---- 系列の色(預け金 / 借入金) ---- */
 .series-s1 { --series: var(--pos); }
 .series-s2 { --series: var(--series-2); }

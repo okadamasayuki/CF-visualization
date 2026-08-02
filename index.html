@@ -231,11 +231,30 @@
       <div class="card">
         <h3>詳細情報を入れて精度を上げる <span id="detail-subject" class="count-badge"></span></h3>
         <p class="table-hint">
-          BS・PL・SSだけでは足りない情報を補うと、簡便法の仮定を減らせます。
-          ここで採用するのは<strong>区分の合計と現金残高を変えない組み替えだけ</strong>なので、
-          詳細情報を入れても整合性チェックが崩れることはありません。
+          BS・PL・SSから読み取れない情報を補うと、簡便法の仮定を減らせます。
+          区分間の振替が起きるため<strong>営業CF・投資CF・財務CFの各合計は変わります</strong>(それが分類の是正です)。
+          <strong>増減額と期末残高</strong>は、BSと articulate する事実なので原則として変わりません
+          — ただし「現金同等物の範囲」を変えた場合と「換算差額」を入れた場合は、
+          会計基準どおりに増減額そのものが変わります。
         </p>
         <div id="detail-status" class="detail-status"></div>
+
+        <div class="detail-group">
+          <h4>現金同等物の範囲</h4>
+          <p class="detail-lead">「現金及び預金」のうち、取得日から3か月を超えて満期の到来する定期預金などは現金同等物ではありません。</p>
+          <p class="detail-effect">除いた分だけ期首・期末残高が変わり、その資金移動は投資活動(定期預金の預入・払戻)として表示します。<strong>増減額そのものが変わります。</strong></p>
+        </div>
+        <div id="cash-excluded-form" class="detail-form"></div>
+        <p class="hint">※ 期首・期末の2時点が必要なため、まとめて入れる場合はBSの科目として本体のCSVに
+          <code>現金同等物に含めない預金</code> の行を追加してください(四半期をまたぐ引き継ぎも効きます)。</p>
+
+        <div class="detail-group">
+          <h4>利息及び配当金の表示区分</h4>
+          <p class="detail-lead">日本基準では、継続適用を条件に次の2方式の選択が認められています(IAS 7でも同様に選択の余地があります)。</p>
+          <p class="detail-effect">これは「情報」ではなく会計方針の選択です。区分間の振替なので増減額は変わりません。読み込んだ全社に適用されます。</p>
+        </div>
+        <div id="policy-form" class="policy-form"></div>
+
         <div id="detail-form" class="detail-form"></div>
       </div>
 
@@ -291,12 +310,8 @@
         <div id="deriv-line-text" class="deriv-row"></div>
       </div>
 
-      <div class="card chart-card">
-        <h3>全体像</h3>
-        <div class="chart-wrap">
-          <svg id="flow-diagram" role="img" aria-label="BS・PL・SS・補足情報が営業CF・投資CF・財務CFに流れ込み、現金及び現金同等物の期末残高に至る概念図"></svg>
-        </div>
-      </div>
+      <h2 class="section-title">各行の算式一覧</h2>
+      <div id="derivation-list"></div>
 
       <div class="card">
         <h3>簡便法としての仮定</h3>
