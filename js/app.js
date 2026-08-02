@@ -1,48 +1,12 @@
 "use strict";
 
-/* =========================================================
- * 入力項目の定義
- * ======================================================= */
+const STORAGE_KEY = "cf-visualization-csv-v1";
 
-// BS: 前期末(prev)・当期末(curr)の2列
-const BS_FIELDS = [
-  { key: "cash",        label: "現金及び預金",        group: "資産" },
-  { key: "receivables", label: "売上債権",            group: "資産" },
-  { key: "inventory",   label: "棚卸資産",            group: "資産" },
-  { key: "otherCA",     label: "その他流動資産",      group: "資産" },
-  { key: "tangible",    label: "有形固定資産(純額)", group: "資産" },
-  { key: "investments", label: "投資その他の資産",    group: "資産" },
-  { key: "payables",    label: "仕入債務",            group: "負債" },
-  { key: "shortLoans",  label: "短期借入金",          group: "負債" },
-  { key: "otherCL",     label: "その他流動負債",      group: "負債" },
-  { key: "longLoans",   label: "長期借入金",          group: "負債" },
-  { key: "netAssets",   label: "純資産合計",          group: "純資産" },
-];
-
-const PL_FIELDS = [
-  { key: "pretaxIncome",     label: "税引前当期純利益" },
-  { key: "depreciation",     label: "減価償却費" },
-  { key: "interestIncome",   label: "受取利息及び受取配当金" },
-  { key: "interestExpense",  label: "支払利息" },
-  { key: "gainOnSale",       label: "固定資産売却損益(益は+、損は−)" },
-  { key: "incomeTaxes",      label: "法人税等" },
-];
-
-const SUP_FIELDS = [
-  { key: "saleProceeds", label: "有形固定資産の売却による収入" },
-];
-
-const SS_FIELDS = [
-  { key: "stockIssue",      label: "新株の発行(増資)" },
-  { key: "dividendsPaid",   label: "剰余金の配当(配当金の支払額)" },
-  { key: "treasuryBuy",     label: "自己株式の取得" },
-  { key: "treasurySell",    label: "自己株式の処分" },
-];
-
-const STORAGE_KEY = "cf-visualization-inputs-v1";
+/** 直近に読み込んだCSVの内容 */
+let current = null; // { name, text, result }
 
 /* =========================================================
- * フォーム生成
+ * 小さなユーティリティ
  * ======================================================= */
 
 function el(tag, attrs = {}, ...children) {
@@ -56,85 +20,30 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
-function makeInput(id) {
-  const input = el("input", {
-    type: "number", step: "any", id, placeholder: "0", inputmode: "decimal",
-  });
-  input.addEventListener("input", onInputChanged);
-  return input;
+// 会計表記: 負の値は △1,234
+function fmt(value) {
+  const rounded = Math.round(value * 100) / 100;
+  const abs = Math.abs(rounded).toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+  return rounded < 0 ? `△${abs}` : abs;
 }
 
-function buildForms() {
-  const bsBody = document.getElementById("bs-body");
-  for (const f of BS_FIELDS) {
-    const label = el("td", { class: "label" });
-    label.append(el("span", { class: "group-tag", text: f.group }), f.label);
-    const tdPrev = el("td"); tdPrev.append(makeInput(`bs-${f.key}-prev`));
-    const tdCurr = el("td"); tdCurr.append(makeInput(`bs-${f.key}-curr`));
-    bsBody.append(el("tr", {}, label, tdPrev, tdCurr));
-  }
-  const plBody = document.getElementById("pl-body");
-  for (const f of PL_FIELDS) {
-    const td = el("td"); td.append(makeInput(`pl-${f.key}`));
-    plBody.append(el("tr", {}, el("td", { class: "label", text: f.label }), td));
-  }
-  const supBody = document.getElementById("sup-body");
-  for (const f of SUP_FIELDS) {
-    const td = el("td"); td.append(makeInput(`sup-${f.key}`));
-    supBody.append(el("tr", {}, el("td", { class: "label", text: f.label }), td));
-  }
-  const ssBody = document.getElementById("ss-body");
-  for (const f of SS_FIELDS) {
-    const td = el("td"); td.append(makeInput(`ss-${f.key}`));
-    ssBody.append(el("tr", {}, el("td", { class: "label", text: f.label }), td));
-  }
+// チャート・ツールチップ用: +1,234 / −1,234
+function fmtSigned(value) {
+  const abs = Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+  if (value > 0) return `+${abs}`;
+  if (value < 0) return `−${abs}`;
+  return abs;
 }
 
-/* =========================================================
- * 入力の読み取り・保存
- * ======================================================= */
-
-function num(id) {
-  const raw = document.getElementById(id).value;
-  const v = parseFloat(raw);
-  return Number.isFinite(v) ? v : 0;
-}
-
-function readInputs() {
-  const bs = { prev: {}, curr: {} };
-  for (const f of BS_FIELDS) {
-    bs.prev[f.key] = num(`bs-${f.key}-prev`);
-    bs.curr[f.key] = num(`bs-${f.key}-curr`);
-  }
-  const pl = {};
-  for (const f of PL_FIELDS) pl[f.key] = num(`pl-${f.key}`);
-  const sup = {};
-  for (const f of SUP_FIELDS) sup[f.key] = num(`sup-${f.key}`);
-  const ss = {};
-  for (const f of SS_FIELDS) ss[f.key] = num(`ss-${f.key}`);
-  return { bs, pl, sup, ss };
-}
-
-function hasAnyInput() {
-  return Array.from(document.querySelectorAll(".input-table input"))
-    .some((i) => i.value.trim() !== "");
-}
-
-function saveInputs() {
-  const data = {};
-  for (const input of document.querySelectorAll(".input-table input")) {
-    if (input.value.trim() !== "") data[input.id] = input.value;
-  }
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (_) { /* 無視 */ }
-}
-
-function restoreInputs() {
-  let data;
-  try { data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch (_) { return; }
-  for (const [id, value] of Object.entries(data)) {
-    const input = document.getElementById(id);
-    if (input) input.value = value;
-  }
+function downloadText(filename, text) {
+  // ExcelでそのままUTF-8として開けるようBOMを付ける
+  const blob = new Blob(["﻿" + text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 /* =========================================================
@@ -146,22 +55,22 @@ function computeCF({ bs, pl, sup, ss }) {
 
   // --- 営業活動によるキャッシュ・フロー ---
   const operatingItems = [
-    { label: "税引前当期純利益",                 value: pl.pretaxIncome, always: true },
-    { label: "減価償却費",                       value: pl.depreciation },
-    { label: "受取利息及び受取配当金",           value: -pl.interestIncome },
-    { label: "支払利息",                         value: pl.interestExpense },
+    { label: "税引前当期純利益", value: pl.pretaxIncome, always: true },
+    { label: "減価償却費", value: pl.depreciation },
+    { label: "受取利息及び受取配当金", value: -pl.interestIncome },
+    { label: "支払利息", value: pl.interestExpense },
     { label: pl.gainOnSale >= 0 ? "固定資産売却益" : "固定資産売却損", value: -pl.gainOnSale },
     { label: d("receivables") >= 0 ? "売上債権の増加額" : "売上債権の減少額", value: -d("receivables") },
-    { label: d("inventory") >= 0 ? "棚卸資産の増加額" : "棚卸資産の減少額",   value: -d("inventory") },
+    { label: d("inventory") >= 0 ? "棚卸資産の増加額" : "棚卸資産の減少額", value: -d("inventory") },
     { label: d("otherCA") >= 0 ? "その他流動資産の増加額" : "その他流動資産の減少額", value: -d("otherCA") },
-    { label: d("payables") >= 0 ? "仕入債務の増加額" : "仕入債務の減少額",     value: d("payables") },
+    { label: d("payables") >= 0 ? "仕入債務の増加額" : "仕入債務の減少額", value: d("payables") },
     { label: d("otherCL") >= 0 ? "その他流動負債の増加額" : "その他流動負債の減少額", value: d("otherCL") },
   ];
   const subtotal = operatingItems.reduce((s, i) => s + i.value, 0);
   const afterSubtotalItems = [
     { label: "利息及び配当金の受取額", value: pl.interestIncome },
-    { label: "利息の支払額",           value: -pl.interestExpense },
-    { label: "法人税等の支払額",       value: -pl.incomeTaxes },
+    { label: "利息の支払額", value: -pl.interestExpense },
+    { label: "法人税等の支払額", value: -pl.incomeTaxes },
   ];
   const operatingCF = subtotal + afterSubtotalItems.reduce((s, i) => s + i.value, 0);
 
@@ -178,12 +87,12 @@ function computeCF({ bs, pl, sup, ss }) {
 
   // --- 財務活動によるキャッシュ・フロー ---
   const financingItems = [
-    { label: "短期借入金の純増減額",       value: d("shortLoans") },
+    { label: "短期借入金の純増減額", value: d("shortLoans") },
     { label: d("longLoans") >= 0 ? "長期借入れによる収入(純額)" : "長期借入金の返済による支出(純額)", value: d("longLoans") },
-    { label: "株式の発行による収入",       value: ss.stockIssue },
-    { label: "自己株式の取得による支出",   value: -ss.treasuryBuy },
-    { label: "自己株式の処分による収入",   value: ss.treasurySell },
-    { label: "配当金の支払額",             value: -ss.dividendsPaid },
+    { label: "株式の発行による収入", value: ss.stockIssue },
+    { label: "自己株式の取得による支出", value: -ss.treasuryBuy },
+    { label: "自己株式の処分による収入", value: ss.treasurySell },
+    { label: "配当金の支払額", value: -ss.dividendsPaid },
   ];
   const financingCF = financingItems.reduce((s, i) => s + i.value, 0);
 
@@ -214,7 +123,7 @@ function computeChecks({ bs, pl, ss }, cf) {
     checks.push({
       ok: Math.abs(diff) < 0.5,
       title: `BS貸借一致(${name})`,
-      detail: diff === 0
+      detail: Math.abs(diff) < 0.5
         ? `資産合計 ${fmt(assets(p))} = 負債・純資産合計 ${fmt(liabilities(p) + bs[p].netAssets)}`
         : `差額 ${fmt(diff)}(資産合計 ${fmt(assets(p))} / 負債・純資産合計 ${fmt(liabilities(p) + bs[p].netAssets)})`,
     });
@@ -226,7 +135,7 @@ function computeChecks({ bs, pl, ss }, cf) {
     title: "CF計算書とBSの現金残高の整合",
     detail: Math.abs(cashDiff) < 0.5
       ? `計算上の期末残高 ${fmt(cf.endingCash)} = BSの現金及び預金 ${fmt(bs.curr.cash)}`
-      : `計算上の期末残高 ${fmt(cf.endingCash)} と BSの現金及び預金 ${fmt(bs.curr.cash)} に差額 ${fmt(cashDiff)} があります。入力値をご確認ください。`,
+      : `計算上の期末残高 ${fmt(cf.endingCash)} と BSの現金及び預金 ${fmt(bs.curr.cash)} に差額 ${fmt(cashDiff)} があります。CSVの入力値をご確認ください。`,
   });
 
   const netIncome = pl.pretaxIncome - pl.incomeTaxes;
@@ -244,22 +153,42 @@ function computeChecks({ bs, pl, ss }, cf) {
 }
 
 /* =========================================================
- * 表示ユーティリティ
+ * 読み込み結果テーブルの描画
  * ======================================================= */
 
-// 会計表記: 負の値は △1,234
-function fmt(value) {
-  const rounded = Math.round(value * 100) / 100;
-  const abs = Math.abs(rounded).toLocaleString("ja-JP", { maximumFractionDigits: 2 });
-  return rounded < 0 ? `△${abs}` : abs;
-}
+function renderLoadedTables(data) {
+  const bsBody = document.getElementById("bs-body");
+  bsBody.innerHTML = "";
+  for (const f of DISPLAY_FIELDS.bs) {
+    const label = el("td", { class: "label" });
+    label.append(el("span", { class: "group-tag", text: f.group }), f.label);
+    bsBody.append(el("tr", {},
+      label,
+      el("td", { class: "num", text: fmt(data.bs.prev[f.key]) }),
+      el("td", { class: "num", text: fmt(data.bs.curr[f.key]) }),
+    ));
+  }
 
-// チャート・ツールチップ用: +1,234 / −1,234
-function fmtSigned(value) {
-  const abs = Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 2 });
-  if (value > 0) return `+${abs}`;
-  if (value < 0) return `−${abs}`;
-  return abs;
+  for (const section of ["pl", "sup", "ss"]) {
+    const body = document.getElementById(`${section}-body`);
+    body.innerHTML = "";
+    for (const f of DISPLAY_FIELDS[section]) {
+      body.append(el("tr", {},
+        el("td", { class: "label", text: f.label }),
+        el("td", { class: "num", text: fmt(data[section][f.key]) }),
+      ));
+    }
+  }
+
+  const assets = (p) => data.bs[p].cash + data.bs[p].receivables + data.bs[p].inventory +
+    data.bs[p].otherCA + data.bs[p].tangible + data.bs[p].investments;
+  const liabEq = (p) => data.bs[p].payables + data.bs[p].shortLoans + data.bs[p].otherCL +
+    data.bs[p].longLoans + data.bs[p].netAssets;
+  document.getElementById("bs-assets-prev").textContent = fmt(assets("prev"));
+  document.getElementById("bs-assets-curr").textContent = fmt(assets("curr"));
+  document.getElementById("bs-liabeq-prev").textContent = fmt(liabEq("prev"));
+  document.getElementById("bs-liabeq-curr").textContent = fmt(liabEq("curr"));
+  document.getElementById("pl-netincome").textContent = fmt(data.pl.pretaxIncome - data.pl.incomeTaxes);
 }
 
 /* =========================================================
@@ -396,19 +325,15 @@ function renderWaterfall(cf) {
   steps.forEach((s, i) => {
     const cx = M.left + band * i + band / 2;
     const x0 = cx - BAR_W / 2;
-    const topVal = Math.max(s.from, s.to);
-    const botVal = Math.min(s.from, s.to);
-    const topY = y(topVal);
-    const botY = y(botVal);
+    const topY = y(Math.max(s.from, s.to));
+    const botY = y(Math.min(s.from, s.to));
 
     const g = svgEl("g", { class: "band" });
 
-    // バー本体
     const cls = s.type === "total" ? "bar-total" : s.value >= 0 ? "bar-pos" : "bar-neg";
     // データ端 = 増加・残高なら上端、減少なら下端
     const roundTop = s.type === "total" ? s.to >= 0 : s.value >= 0;
-    const path = svgEl("path", { class: `bar ${cls}`, d: barPath(x0, topY, botY, roundTop) });
-    g.append(path);
+    g.append(svgEl("path", { class: `bar ${cls}`, d: barPath(x0, topY, botY, roundTop) }));
 
     // コネクタ(前のバーの終点 → このバーの始点)
     if (i > 0) {
@@ -427,7 +352,6 @@ function renderWaterfall(cf) {
     vl.textContent = s.type === "total" ? fmt(s.value) : fmtSigned(s.value);
     g.append(vl);
 
-    // カテゴリラベル
     const cl = svgEl("text", { class: "cat-label", x: cx, y: H - 12, "text-anchor": "middle" });
     cl.textContent = s.label;
     g.append(cl);
@@ -437,7 +361,8 @@ function renderWaterfall(cf) {
       class: "hit", x: M.left + band * i, y: M.top, width: band, height: plotH,
     });
     hit.addEventListener("mousemove", (ev) => {
-      const wrap = svg.parentElement.getBoundingClientRect();
+      const wrapEl = svg.parentElement;
+      const wrap = wrapEl.getBoundingClientRect();
       tooltip.hidden = false;
       tooltip.innerHTML = "";
       tooltip.append(
@@ -445,9 +370,11 @@ function renderWaterfall(cf) {
         el("div", { class: "tt-value", text: s.type === "total" ? `残高: ${fmt(s.value)}` : `増減: ${fmtSigned(s.value)}` }),
         el("div", { class: "tt-value", text: s.type === "total" ? "" : `累計: ${fmt(s.to)}` }),
       );
-      const tx = Math.min(ev.clientX - wrap.left + 14, wrap.width - tooltip.offsetWidth - 4);
+      // 横スクロール中でもツールチップがカーソルに追従するよう scrollLeft を加味する
+      const sx = wrapEl.scrollLeft;
+      const tx = Math.min(ev.clientX - wrap.left + sx + 14, sx + wrap.width - tooltip.offsetWidth - 4);
       const ty = Math.max(ev.clientY - wrap.top - tooltip.offsetHeight - 10, 0);
-      tooltip.style.left = `${Math.max(tx, 0)}px`;
+      tooltip.style.left = `${Math.max(tx, sx)}px`;
       tooltip.style.top = `${ty}px`;
     });
     hit.addEventListener("mouseleave", () => { tooltip.hidden = true; });
@@ -458,7 +385,7 @@ function renderWaterfall(cf) {
 }
 
 /* =========================================================
- * チェック結果の描画
+ * チェック結果・メッセージの描画
  * ======================================================= */
 
 function renderChecks(checks) {
@@ -476,112 +403,170 @@ function renderChecks(checks) {
   }
 }
 
-/* =========================================================
- * 集計値のライブ表示(入力カードのフッター)
- * ======================================================= */
-
-function renderInputTotals({ bs, pl }) {
-  const assets = (p) => bs[p].cash + bs[p].receivables + bs[p].inventory +
-    bs[p].otherCA + bs[p].tangible + bs[p].investments;
-  const liabEq = (p) => bs[p].payables + bs[p].shortLoans + bs[p].otherCL +
-    bs[p].longLoans + bs[p].netAssets;
-  document.getElementById("bs-assets-prev").textContent = fmt(assets("prev"));
-  document.getElementById("bs-assets-curr").textContent = fmt(assets("curr"));
-  document.getElementById("bs-liabeq-prev").textContent = fmt(liabEq("prev"));
-  document.getElementById("bs-liabeq-curr").textContent = fmt(liabEq("curr"));
-  document.getElementById("pl-netincome").textContent = fmt(pl.pretaxIncome - pl.incomeTaxes);
+function renderMessages(errors, warnings) {
+  const wrap = document.getElementById("messages");
+  wrap.innerHTML = "";
+  const all = [
+    ...errors.map((t) => ({ kind: "error", text: t })),
+    ...warnings.map((t) => ({ kind: "warn", text: t })),
+  ];
+  wrap.hidden = all.length === 0;
+  for (const m of all) {
+    wrap.append(el("div", { class: `message ${m.kind}` },
+      el("span", { class: "icon", text: m.kind === "error" ? "×" : "!" }),
+      el("span", { text: m.text }),
+    ));
+  }
 }
 
 /* =========================================================
- * メインフロー
+ * 読み込み処理
  * ======================================================= */
 
-function recalc() {
-  const inputs = readInputs();
-  renderInputTotals(inputs);
+function showEmptyState() {
+  document.getElementById("loaded").hidden = true;
+  document.getElementById("results").hidden = true;
+  document.getElementById("checks").hidden = true;
+  document.getElementById("empty-state").hidden = false;
+  document.getElementById("btn-clear").hidden = true;
+  document.getElementById("btn-export").hidden = true;
+}
 
-  const results = document.getElementById("results");
-  const emptyState = document.getElementById("empty-state");
-  const checksWrap = document.getElementById("checks");
+/** CSVテキストを取り込んで画面を更新する */
+function applyCSV(text, name) {
+  const result = parseFinancialCSV(text);
+  current = { name, text, result };
 
-  if (!hasAnyInput()) {
-    results.hidden = true;
-    checksWrap.hidden = true;
-    emptyState.hidden = false;
+  const status = document.getElementById("file-status");
+  status.hidden = false;
+  status.textContent = result.ok
+    ? `${name} を読み込みました(${result.matched}件の科目を認識)`
+    : `${name} を読み込めませんでした`;
+  status.className = `file-status ${result.ok ? "ok" : "ng"}`;
+
+  renderMessages(result.errors, result.warnings);
+
+  if (!result.ok) {
+    showEmptyState();
+    document.getElementById("btn-clear").hidden = false;
     return;
   }
 
-  const cf = computeCF(inputs);
-  const checks = computeChecks(inputs, cf);
-
-  renderChecks(checks);
+  const cf = computeCF(result.data);
+  renderLoadedTables(result.data);
+  renderChecks(computeChecks(result.data, cf));
   renderStatement(cf);
   renderWaterfall(cf);
 
-  results.hidden = false;
-  emptyState.hidden = true;
+  document.getElementById("loaded").hidden = false;
+  document.getElementById("results").hidden = false;
+  document.getElementById("empty-state").hidden = true;
+  document.getElementById("btn-clear").hidden = false;
+  document.getElementById("btn-export").hidden = false;
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ name, text }));
+  } catch (_) { /* 保存できなくても動作に影響はない */ }
 }
 
-let saveTimer = null;
-function onInputChanged() {
-  recalc();
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveInputs, 300);
-}
-
-/* =========================================================
- * サンプルデータ
- * ======================================================= */
-
-const SAMPLE = {
-  "bs-cash-prev": 12000,        "bs-cash-curr": 7900,
-  "bs-receivables-prev": 18000, "bs-receivables-curr": 21000,
-  "bs-inventory-prev": 9000,    "bs-inventory-curr": 10000,
-  "bs-otherCA-prev": 2000,      "bs-otherCA-curr": 2500,
-  "bs-tangible-prev": 35000,    "bs-tangible-curr": 38000,
-  "bs-investments-prev": 4000,  "bs-investments-curr": 5000,
-  "bs-payables-prev": 11000,    "bs-payables-curr": 12500,
-  "bs-shortLoans-prev": 6000,   "bs-shortLoans-curr": 5000,
-  "bs-otherCL-prev": 3000,      "bs-otherCL-curr": 3300,
-  "bs-longLoans-prev": 20000,   "bs-longLoans-curr": 18000,
-  "bs-netAssets-prev": 40000,   "bs-netAssets-curr": 45600,
-  "pl-pretaxIncome": 9000,
-  "pl-depreciation": 4500,
-  "pl-interestIncome": 200,
-  "pl-interestExpense": 600,
-  "pl-gainOnSale": 300,
-  "pl-incomeTaxes": 3100,
-  "sup-saleProceeds": 1800,
-  "ss-stockIssue": 2000,
-  "ss-dividendsPaid": 1800,
-  "ss-treasuryBuy": 500,
-  "ss-treasurySell": 0,
-};
-
-function loadSample() {
-  for (const input of document.querySelectorAll(".input-table input")) input.value = "";
-  for (const [id, v] of Object.entries(SAMPLE)) {
-    const input = document.getElementById(id);
-    if (input) input.value = v;
+async function handleFile(file) {
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    renderMessages(["ファイルサイズが大きすぎます(5MBまで)。"], []);
+    return;
   }
-  recalc();
-  saveInputs();
+  try {
+    applyCSV(await decodeFile(file), file.name);
+  } catch (err) {
+    renderMessages([`ファイルを読み込めませんでした: ${err.message}`], []);
+    showEmptyState();
+  }
 }
 
 function clearAll() {
-  for (const input of document.querySelectorAll(".input-table input")) input.value = "";
+  current = null;
+  document.getElementById("file-input").value = "";
+  document.getElementById("file-status").hidden = true;
+  document.getElementById("messages").hidden = true;
+  document.getElementById("messages").innerHTML = "";
   try { localStorage.removeItem(STORAGE_KEY); } catch (_) { /* 無視 */ }
-  recalc();
+  showEmptyState();
 }
+
+/* =========================================================
+ * サンプルCSV(sample.csv と同じ内容)
+ * ======================================================= */
+
+const SAMPLE_CSV = [
+  "区分,科目,前期末,当期末",
+  "BS,現金及び預金,12000,7900",
+  "BS,売上債権,18000,21000",
+  "BS,棚卸資産,9000,10000",
+  "BS,その他流動資産,2000,2500",
+  "BS,有形固定資産(純額),35000,38000",
+  "BS,投資その他の資産,4000,5000",
+  "BS,仕入債務,11000,12500",
+  "BS,短期借入金,6000,5000",
+  "BS,その他流動負債,3000,3300",
+  "BS,長期借入金,20000,18000",
+  "BS,純資産合計,40000,45600",
+  "PL,税引前当期純利益,,9000",
+  "PL,減価償却費,,4500",
+  "PL,受取利息及び受取配当金,,200",
+  "PL,支払利息,,600",
+  "PL,固定資産売却損益(益は+、損は−),,300",
+  "PL,法人税等,,3100",
+  "補足,有形固定資産の売却による収入,,1800",
+  "SS,新株の発行(増資),,2000",
+  "SS,剰余金の配当(配当金の支払額),,1800",
+  "SS,自己株式の取得,,500",
+  "SS,自己株式の処分,,0",
+].join("\r\n") + "\r\n";
 
 /* =========================================================
  * 初期化
  * ======================================================= */
 
 document.addEventListener("DOMContentLoaded", () => {
-  buildForms();
-  restoreInputs();
-  document.getElementById("btn-sample").addEventListener("click", loadSample);
+  const input = document.getElementById("file-input");
+  const dropzone = document.getElementById("dropzone");
+
+  input.addEventListener("change", () => handleFile(input.files[0]));
+
+  for (const type of ["dragenter", "dragover"]) {
+    dropzone.addEventListener(type, (ev) => {
+      ev.preventDefault();
+      dropzone.classList.add("is-over");
+    });
+  }
+  for (const type of ["dragleave", "dragend"]) {
+    dropzone.addEventListener(type, () => dropzone.classList.remove("is-over"));
+  }
+  dropzone.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    dropzone.classList.remove("is-over");
+    handleFile(ev.dataTransfer.files[0]);
+  });
+  // ページ外へのドロップでブラウザがファイルを開いてしまうのを防ぐ
+  for (const type of ["dragover", "drop"]) {
+    document.addEventListener(type, (ev) => {
+      if (!dropzone.contains(ev.target)) ev.preventDefault();
+    });
+  }
+
+  document.getElementById("btn-sample")
+    .addEventListener("click", () => applyCSV(SAMPLE_CSV, "sample.csv"));
+  document.getElementById("btn-template")
+    .addEventListener("click", () => downloadText("cf-template.csv", buildTemplateCSV()));
+  document.getElementById("btn-export")
+    .addEventListener("click", () => {
+      if (current) downloadText("cf-input.csv", buildTemplateCSV(current.result.data));
+    });
   document.getElementById("btn-clear").addEventListener("click", clearAll);
-  recalc();
+
+  // 前回読み込んだCSVを復元
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (saved && saved.text) applyCSV(saved.text, saved.name || "前回のファイル");
+  } catch (_) { /* 無視 */ }
 });

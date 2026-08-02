@@ -10,70 +10,105 @@
 <body>
 <header class="site-header">
   <h1>キャッシュ・フロー計算書 ジェネレーター</h1>
-  <p class="subtitle">貸借対照表(BS)・損益計算書(PL)・株主資本等変動計算書(SS)を入力すると、間接法によるキャッシュ・フロー計算書を自動作成して表示します。</p>
+  <p class="subtitle">BS・PL・SSをまとめた1つのCSVファイルをアップロードすると、間接法によるキャッシュ・フロー計算書を自動作成して表示します。</p>
 </header>
 
 <main>
-  <section class="toolbar">
-    <button id="btn-sample" type="button" class="btn btn-secondary">サンプルデータを読み込む</button>
-    <button id="btn-clear" type="button" class="btn btn-ghost">入力をクリア</button>
-    <span class="unit-note">単位:千円(任意の単位でも可・入力は自動保存されます)</span>
+  <!-- ===== アップロード ===== -->
+  <section class="card upload-card">
+    <label id="dropzone" class="dropzone" for="file-input">
+      <input type="file" id="file-input" accept=".csv,.tsv,.txt,text/csv" hidden>
+      <span class="dz-icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M24 32V10"></path><path d="M15 19l9-9 9 9"></path>
+          <path d="M8 30v6a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-6"></path>
+        </svg>
+      </span>
+      <span class="dz-title">CSVファイルをドラッグ&amp;ドロップ、またはクリックして選択</span>
+      <span class="dz-note">BS・PL・SSを1つのファイルにまとめてください / UTF-8・Shift_JIS 対応</span>
+    </label>
+
+    <div class="toolbar">
+      <button id="btn-sample" type="button" class="btn btn-secondary">サンプルCSVを読み込む</button>
+      <button id="btn-template" type="button" class="btn">テンプレートCSVをダウンロード</button>
+      <button id="btn-export" type="button" class="btn" hidden>読み込んだ内容をCSVで保存</button>
+      <button id="btn-clear" type="button" class="btn btn-ghost" hidden>クリア</button>
+    </div>
+
+    <p id="file-status" class="file-status" hidden></p>
+    <div id="messages" class="messages" hidden></div>
+
+    <details class="format-help">
+      <summary>CSVの書式について</summary>
+      <p>1行目に見出し、2行目以降に科目と金額を並べた縦持ち形式です。<code>区分</code>列は任意(読み飛ばします)。BSは前期末・当期末の2列、PL・SS・補足は当期末の列だけを使います。</p>
+<pre><code>区分,科目,前期末,当期末
+BS,現金及び預金,12000,7900
+BS,売上債権,18000,21000
+PL,税引前当期純利益,,9000
+SS,剰余金の配当,,1800</code></pre>
+      <ul>
+        <li>金額は <code>1,234</code> / <code>¥1,234</code> / <code>△1,234</code> / <code>(1,234)</code> / <code>-1,234</code> のいずれの表記でも読み取れます。</li>
+        <li>科目名は別名に対応しています(例:<code>売掛金</code>・<code>受取手形</code> → 売上債権)。同じ科目に複数行あれば合算します。</li>
+        <li>SSと補足情報の金額は、支出・減少項目もすべて正の値で入力してください。</li>
+        <li>認識できない科目の行は読み飛ばし、下に一覧で表示します。</li>
+      </ul>
+    </details>
   </section>
 
-  <section class="inputs">
-    <!-- BS -->
-    <div class="card">
-      <h2>貸借対照表(BS)</h2>
-      <table class="input-table">
-        <thead>
-          <tr><th class="label-col">科目</th><th>前期末</th><th>当期末</th></tr>
-        </thead>
-        <tbody id="bs-body"><!-- JSで生成 --></tbody>
-        <tfoot>
-          <tr class="total-row"><td>資産合計</td><td id="bs-assets-prev">0</td><td id="bs-assets-curr">0</td></tr>
-          <tr class="total-row"><td>負債・純資産合計</td><td id="bs-liabeq-prev">0</td><td id="bs-liabeq-curr">0</td></tr>
-        </tfoot>
-      </table>
-    </div>
+  <!-- ===== 読み込み結果 ===== -->
+  <section id="loaded" hidden>
+    <h2 class="section-title">読み込み結果</h2>
+    <div class="inputs">
+      <div class="card">
+        <h3>貸借対照表(BS)</h3>
+        <table class="data-table">
+          <thead>
+            <tr><th class="label-col">科目</th><th>前期末</th><th>当期末</th></tr>
+          </thead>
+          <tbody id="bs-body"></tbody>
+          <tfoot>
+            <tr class="total-row"><td>資産合計</td><td id="bs-assets-prev">0</td><td id="bs-assets-curr">0</td></tr>
+            <tr class="total-row"><td>負債・純資産合計</td><td id="bs-liabeq-prev">0</td><td id="bs-liabeq-curr">0</td></tr>
+          </tfoot>
+        </table>
+      </div>
 
-    <!-- PL -->
-    <div class="card">
-      <h2>損益計算書(PL)</h2>
-      <table class="input-table">
-        <thead>
-          <tr><th class="label-col">科目</th><th>当期</th></tr>
-        </thead>
-        <tbody id="pl-body"><!-- JSで生成 --></tbody>
-        <tfoot>
-          <tr class="total-row"><td>当期純利益(自動計算)</td><td id="pl-netincome">0</td></tr>
-        </tfoot>
-      </table>
+      <div class="card">
+        <h3>損益計算書(PL)</h3>
+        <table class="data-table">
+          <thead>
+            <tr><th class="label-col">科目</th><th>当期</th></tr>
+          </thead>
+          <tbody id="pl-body"></tbody>
+          <tfoot>
+            <tr class="total-row"><td>当期純利益(自動計算)</td><td id="pl-netincome">0</td></tr>
+          </tfoot>
+        </table>
 
-      <h2 class="section-gap">補足情報</h2>
-      <table class="input-table">
-        <tbody id="sup-body"><!-- JSで生成 --></tbody>
-      </table>
-    </div>
+        <h3 class="section-gap">補足情報</h3>
+        <table class="data-table"><tbody id="sup-body"></tbody></table>
+      </div>
 
-    <!-- SS -->
-    <div class="card">
-      <h2>株主資本等変動計算書(SS)</h2>
-      <table class="input-table">
-        <thead>
-          <tr><th class="label-col">変動事由</th><th>当期</th></tr>
-        </thead>
-        <tbody id="ss-body"><!-- JSで生成 --></tbody>
-      </table>
-      <p class="hint">※ 当期純利益はPLから自動で引き継がれます。金額はすべて正の値で入力してください(支出・減少項目も正の値)。</p>
+      <div class="card">
+        <h3>株主資本等変動計算書(SS)</h3>
+        <table class="data-table">
+          <thead>
+            <tr><th class="label-col">変動事由</th><th>当期</th></tr>
+          </thead>
+          <tbody id="ss-body"></tbody>
+        </table>
+        <p class="hint">※ 当期純利益はPLから自動で引き継がれます。</p>
+      </div>
     </div>
   </section>
 
   <section id="checks" class="checks" hidden></section>
 
+  <!-- ===== 出力 ===== -->
   <section id="results" hidden>
     <div class="card chart-card">
       <h2>キャッシュ・フローの推移(ウォーターフォール)</h2>
-      <div class="legend" id="wf-legend">
+      <div class="legend">
         <span class="legend-item"><span class="swatch swatch-total"></span>残高</span>
         <span class="legend-item"><span class="swatch swatch-pos"></span>増加</span>
         <span class="legend-item"><span class="swatch swatch-neg"></span>減少</span>
@@ -86,8 +121,8 @@
 
     <div class="card">
       <h2>キャッシュ・フロー計算書(間接法)</h2>
-      <p class="statement-meta">自 前期末翌日 至 当期末 (単位:千円)</p>
-      <table class="statement" id="cf-statement"><!-- JSで生成 --></table>
+      <p class="statement-meta">自 前期末翌日 至 当期末</p>
+      <table class="statement" id="cf-statement"></table>
       <details class="assumptions">
         <summary>計算上の前提(簡便法)</summary>
         <ul>
@@ -101,14 +136,17 @@
   </section>
 
   <section id="empty-state" class="empty-state">
-    <p>金額を入力するか、「サンプルデータを読み込む」を押すと、キャッシュ・フロー計算書とチャートがここに表示されます。</p>
+    <p>CSVファイルをアップロードすると、キャッシュ・フロー計算書とチャートがここに表示されます。</p>
+    <p class="empty-sub">まずは「サンプルCSVを読み込む」で動作を確認できます。</p>
   </section>
 </main>
 
 <footer class="site-footer">
-  <p>CF-visualization — BS・PL・SSからキャッシュ・フロー計算書を自動生成する静的Webアプリ</p>
+  <p>CF-visualization — BS・PL・SSのCSVからキャッシュ・フロー計算書を自動生成する静的Webアプリ</p>
 </footer>
 
+<script src="js/schema.js"></script>
+<script src="js/csv.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

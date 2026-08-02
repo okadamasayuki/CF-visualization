@@ -14,7 +14,9 @@
   --total: #898781;     /* 残高(ニュートラル) */
   --good: #006300;
   --bad: #d03b3b;
+  --warn: #9a6400;
   --accent: #2a78d6;
+  --accent-wash: rgba(42, 120, 214, 0.07);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -31,8 +33,10 @@
     --neg: #e66767;
     --total: #898781;
     --good: #0ca30c;
-    --bad: #d03b3b;
+    --bad: #e66767;
+    --warn: #fab219;
     --accent: #3987e5;
+    --accent-wash: rgba(57, 135, 229, 0.12);
   }
 }
 
@@ -65,13 +69,72 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
   font-size: 12px;
 }
 
+/* ---- アップロード ---- */
+.upload-card { margin: 16px 0; }
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 20px;
+  border: 2px dashed var(--grid);
+  border-radius: 12px;
+  background: var(--page);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.dropzone:hover, .dropzone:focus-within { border-color: var(--accent); }
+.dropzone.is-over { border-color: var(--accent); background: var(--accent-wash); }
+.dz-icon { color: var(--text-muted); line-height: 0; }
+.dropzone:hover .dz-icon, .dropzone.is-over .dz-icon { color: var(--accent); }
+.dz-title { font-weight: 600; }
+.dz-note { color: var(--text-muted); font-size: 12px; }
+
+.file-status { margin: 12px 0 0; font-size: 13px; }
+.file-status.ok { color: var(--good); }
+.file-status.ng { color: var(--bad); }
+
+.messages { display: grid; gap: 8px; margin-top: 12px; }
+.message {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.message .icon { font-weight: 700; }
+.message.error { border-color: var(--bad); }
+.message.error .icon { color: var(--bad); }
+.message.warn .icon { color: var(--warn); }
+
+.format-help { margin-top: 16px; font-size: 12px; color: var(--text-secondary); }
+.format-help summary { cursor: pointer; color: var(--text-muted); }
+.format-help p { margin: 10px 0; }
+.format-help ul { margin: 8px 0 0; padding-left: 20px; }
+.format-help pre {
+  background: var(--page);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.format-help code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+.section-title { font-size: 15px; margin: 24px 0 10px; }
+
 /* ---- ツールバー ---- */
 .toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin: 16px 0;
+  margin: 16px 0 0;
 }
 .btn {
   font: inherit;
@@ -88,7 +151,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
 .btn-ghost { background: transparent; }
 .unit-note { color: var(--text-muted); font-size: 12px; }
 
-/* ---- 入力カード ---- */
+/* ---- 読み込み結果のカード ---- */
 .inputs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -101,10 +164,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
   padding: 18px 18px 14px;
 }
 .card h2 { font-size: 15px; margin: 0 0 10px; }
+.card h3 { font-size: 14px; margin: 0 0 8px; }
 .section-gap { margin-top: 22px; }
 
-.input-table { width: 100%; border-collapse: collapse; }
-.input-table th {
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
   text-align: right;
   font-weight: 500;
   color: var(--text-muted);
@@ -112,13 +176,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
   padding: 4px 6px;
   border-bottom: 1px solid var(--grid);
 }
-.input-table th.label-col { text-align: left; }
-.input-table td { padding: 3px 6px; }
-.input-table td.label {
+.data-table th.label-col { text-align: left; }
+.data-table td { padding: 4px 6px; border-bottom: 1px solid var(--grid); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table td.label {
   color: var(--text-secondary);
-  white-space: nowrap;
+  word-break: keep-all; /* 「その他流動資産」などを語の途中で折り返さない */
 }
-.input-table td.label .group-tag {
+.data-table td.label .group-tag {
   display: inline-block;
   font-size: 10px;
   color: var(--text-muted);
@@ -128,31 +193,21 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
   margin-right: 6px;
   vertical-align: 1px;
 }
-.input-table input {
-  width: 100%;
-  min-width: 90px;
-  font: inherit;
+.data-table td.num {
   font-variant-numeric: tabular-nums;
   text-align: right;
-  padding: 5px 8px;
-  border: 1px solid var(--grid);
-  border-radius: 6px;
-  background: var(--page);
-  color: var(--text-primary);
+  white-space: nowrap;
+  width: 84px;
 }
-.input-table input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-  border-color: transparent;
-}
-.input-table tfoot td {
+.data-table tfoot td {
   font-variant-numeric: tabular-nums;
   text-align: right;
   padding: 6px;
   border-top: 1px solid var(--baseline);
+  border-bottom: none;
   font-weight: 600;
 }
-.input-table tfoot td:first-child { text-align: left; }
+.data-table tfoot td:first-child { text-align: left; }
 .hint { color: var(--text-muted); font-size: 12px; margin: 10px 0 0; }
 
 /* ---- チェック結果 ---- */
@@ -181,8 +236,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
 .swatch-neg { background: var(--neg); }
 .swatch-total { background: var(--total); }
 
-.chart-wrap { position: relative; width: 100%; }
-#waterfall { width: 100%; height: auto; display: block; }
+.chart-wrap { position: relative; width: 100%; overflow-x: auto; }
+/* 画面が狭いときは縮小せず横スクロールさせる(ラベルが読めなくなるため) */
+#waterfall { width: 100%; min-width: 600px; height: auto; display: block; }
 
 #waterfall .grid-line { stroke: var(--grid); stroke-width: 1; }
 #waterfall .baseline { stroke: var(--baseline); stroke-width: 1; }
@@ -250,6 +306,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
   border: 1px dashed var(--grid);
   border-radius: 12px;
 }
+.empty-state p { margin: 0; }
+.empty-sub { font-size: 12px; margin-top: 6px !important; }
 
 @media (max-width: 720px) {
   .inputs { grid-template-columns: 1fr; }
