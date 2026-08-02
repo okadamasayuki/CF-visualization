@@ -35,11 +35,16 @@ for (let i = 0, y = START.year, q = START.q; i < QUARTERS; i++) {
 }
 
 const BS_ITEMS = [
-  ['cash', '現金及び預金'], ['deposits', '預け金'], ['receivables', '売上債権'],
+  ['cash', '現金及び預金'], ['deposits', '預け金'], ['receivables', '営業債権'],
   ['inventory', '棚卸資産'], ['otherCA', 'その他流動資産'], ['tangible', '有形固定資産(純額)'],
-  ['investments', '投資その他の資産'], ['payables', '仕入債務'], ['shortLoans', '短期借入金'],
-  ['otherCL', 'その他流動負債'], ['longLoans', '長期借入金'], ['netAssets', '純資産合計'],
+  ['investments', '投資その他の資産'], ['payables', '営業債務'], ['shortLoans', '短期借入金'],
+  ['otherCL', 'その他流動負債'], ['longLoans', '長期借入金'],
+  ['otherFixedLiab', 'その他固定負債'], ['retirementBenefits', '退職給付引当金'],
+  ['netAssets', '純資産合計'],
 ];
+
+// 貸借一致・純資産逆算で使う負債キー(BS_ITEMS と揃えること)
+const LIAB_KEYS = ['payables', 'shortLoans', 'otherCL', 'longLoans', 'otherFixedLiab', 'retirementBenefits'];
 
 const rows = [];
 const stats = { negOCF: 0, cashDown: 0, ocf: [] };
@@ -62,10 +67,12 @@ for (const name of NAMES) {
     shortLoans: S(pick(0, 12000)),
     otherCL: S(pick(1500, 6000)),
     longLoans: S(pick(4000, 30000)),
+    otherFixedLiab: S(pick(500, 6000)),
+    retirementBenefits: S(pick(1000, 12000)),
   };
   const assets0 = prev.cash + prev.deposits + prev.receivables + prev.inventory +
     prev.otherCA + prev.tangible + prev.investments;
-  const liab0 = prev.payables + prev.shortLoans + prev.otherCL + prev.longLoans;
+  const liab0 = LIAB_KEYS.reduce((s, k) => s + prev[k], 0);
   prev.netAssets = assets0 - liab0;
 
   let baseRevenue = S(pick(30000, 90000));
@@ -103,6 +110,8 @@ for (const name of NAMES) {
       shortLoans: Math.max(0, prev.shortLoans + S(pick(-3000, 3000))),
       otherCL: Math.max(0, prev.otherCL + S(pick(-900, 1200))),
       longLoans: Math.max(0, prev.longLoans + S(pick(-4000, 3500))),
+      otherFixedLiab: Math.max(0, prev.otherFixedLiab + S(pick(-600, 800))),
+      retirementBenefits: Math.max(0, prev.retirementBenefits + S(pick(-400, 900))),
     };
     // 純資産はSSの変動事由と一致させる
     curr.netAssets = prev.netAssets + ni + issue - div - buy + sell;
@@ -110,7 +119,7 @@ for (const name of NAMES) {
     // 現金は貸借一致から逆算する
     const nonCash = curr.deposits + curr.receivables + curr.inventory +
       curr.otherCA + curr.tangible + curr.investments;
-    const liab = () => curr.payables + curr.shortLoans + curr.otherCL + curr.longLoans;
+    const liab = () => LIAB_KEYS.reduce((s, k) => s + curr[k], 0);
     curr.cash = liab() + curr.netAssets - nonCash;
     if (curr.cash < 500) { // 現金が枯渇する組み合わせは短期借入で埋める
       curr.shortLoans += 500 - curr.cash;
@@ -120,7 +129,7 @@ for (const name of NAMES) {
     // --- 検算(アプリと同じ間接法のロジック) ---
     const d = (k) => curr[k] - prev[k];
     const ocf = ni + dep - gain - d('receivables') - d('inventory') - d('otherCA') +
-      d('payables') + d('otherCL');
+      d('payables') + d('otherCL') + d('otherFixedLiab') + d('retirementBenefits');
     const icf = -d('tangible') - dep + gain - d('investments') - d('deposits');
     const fcf = d('shortLoans') + d('longLoans') + issue - buy + sell - div;
     if (prev.cash + ocf + icf + fcf !== curr.cash) throw new Error(`${name} ${period}: CF不一致`);

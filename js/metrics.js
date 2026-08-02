@@ -5,7 +5,7 @@
  *
  * 定義は日本の実務でよく使われるものを採用し、画面にも併記する。
  *  EBITDA        = 営業利益 + 減価償却費
- *  運転資金       = 売上債権 + 棚卸資産 − 仕入債務
+ *  運転資金       = 営業債権 + 棚卸資産 − 営業債務
  *  有利子負債     = 短期借入金 + 長期借入金
  *  ネット有利子負債 = 有利子負債 − (現金及び預金 + 預け金)
  *  投下資本       = 有利子負債 + 純資産
@@ -24,7 +24,7 @@ const METRIC_ROWS = [
   { key: "ebitda", label: "EBITDA", kind: "amount", good: "up", note: "営業利益 + 減価償却費" },
   { key: "ebitdaMargin", label: "EBITDAマージン", kind: "pct", good: "up", note: "EBITDA ÷ 売上高" },
   { key: "roic", label: "ROIC", kind: "pct", good: "up", note: "NOPAT(年換算) ÷ 投下資本(期首期末平均)" },
-  { key: "workingCapital", label: "運転資金", kind: "amount", note: "売上債権 + 棚卸資産 − 仕入債務" },
+  { key: "workingCapital", label: "運転資金", kind: "amount", note: "営業債権 + 棚卸資産 − 営業債務" },
   { key: "interestBearingDebt", label: "有利子負債", kind: "amount", good: "down", note: "短期借入金 + 長期借入金" },
   { key: "deposits", label: "預け金", kind: "amount" },
   { key: "cashAndDeposits", label: "現金及び預金 + 預け金", kind: "amount", good: "up" },

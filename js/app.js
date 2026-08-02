@@ -172,11 +172,9 @@ function computeCF(data, provided = new Set(), policy = INTEREST_POLICY_DEFAULT)
   const used = [];
   const interestInFinancing = policy === "investingFinancing";
 
-  // --- 非資金項目 ---
   const impairment = val("impairment");
   const retirement = val("retirement");
   const lease = val("leaseAcquisition");
-  // 現金及び現金同等物に係る換算差額。PLを通って税引前利益に入っているので営業から消去する
   const fx = val("fxEffect");
   for (const k of ["impairment", "retirement", "leaseAcquisition", "fxEffect"]) if (val(k)) used.push(k);
 
@@ -186,11 +184,11 @@ function computeCF(data, provided = new Set(), policy = INTEREST_POLICY_DEFAULT)
   const taxPaid = has("taxPaid") ? detail.taxPaid : pl.incomeTaxes;
   for (const k of ["interestReceived", "interestPaid", "taxPaid"]) if (has(k)) used.push(k);
 
-  // 発生額と実際額の差は未収利息・未払利息・未払法人税等の増減であり、
-  // その他流動資産／負債の増減に含まれている。二重計上を避けるため運転資本の行から取り除く。
-  const accruedReceivable = pl.interestIncome - intReceived;   // Δ未収利息
-  const accruedInterest = pl.interestExpense - intPaid;        // Δ未払利息
-  const accruedTax = pl.incomeTaxes - taxPaid;                 // Δ未払法人税等
+  // 発生額と実際額の差(未収利息・未払利息・未払法人税等の増減)は
+  // 運転資本の増減に含まれているため、二重計上を避けて取り除く
+  const accruedReceivable = pl.interestIncome - intReceived;
+  const accruedInterest = pl.interestExpense - intPaid;
+  const accruedTax = pl.incomeTaxes - taxPaid;
   const otherCADelta = d("otherCA") - accruedReceivable;
   const otherCLDelta = d("otherCL") - accruedInterest - accruedTax;
   const carved = accruedReceivable !== 0 || accruedInterest !== 0 || accruedTax !== 0;
@@ -200,56 +198,54 @@ function computeCF(data, provided = new Set(), policy = INTEREST_POLICY_DEFAULT)
     { label: "税引前当期純利益", value: pl.pretaxIncome, always: true },
     { label: "減価償却費", value: pl.depreciation },
     { label: "減損損失", value: impairment, detailed: true },
-    { label: "固定資産除却損", value: retirement, detailed: true },
+    { label: "除却損", value: retirement, detailed: true },
+    // ここから4行は、投資・財務や非資金の損益を営業から取り除くための消去
     { label: "為替差損益", value: -fx, detailed: true },
+    { label: pl.gainOnSale >= 0 ? "固定資産売却益" : "固定資産売却損", value: -pl.gainOnSale },
     { label: "受取利息及び受取配当金", value: -pl.interestIncome },
     { label: "支払利息", value: pl.interestExpense },
-    { label: pl.gainOnSale >= 0 ? "固定資産売却益" : "固定資産売却損", value: -pl.gainOnSale },
-    { label: d("receivables") >= 0 ? "売上債権の増加額" : "売上債権の減少額", value: -d("receivables") },
-    { label: d("inventory") >= 0 ? "棚卸資産の増加額" : "棚卸資産の減少額", value: -d("inventory") },
-    { label: (otherCADelta >= 0 ? "その他流動資産の増加額" : "その他流動資産の減少額") + (carved ? "(未収利息を除く)" : ""),
-      value: -otherCADelta, detailed: carved },
-    { label: d("payables") >= 0 ? "仕入債務の増加額" : "仕入債務の減少額", value: d("payables") },
-    { label: (otherCLDelta >= 0 ? "その他流動負債の増加額" : "その他流動負債の減少額") + (carved ? "(未払利息・未払法人税等を除く)" : ""),
-      value: otherCLDelta, detailed: carved },
+    { label: "営業債権の増減", value: -d("receivables") },
+    { label: "棚卸資産の増減", value: -d("inventory") },
+    { label: "その他流動資産の増減" + (carved ? "(未収利息を除く)" : ""), value: -otherCADelta, detailed: carved },
+    { label: "営業債務の増減", value: d("payables") },
+    { label: "その他流動負債の増減" + (carved ? "(未払利息・未払法人税等を除く)" : ""), value: otherCLDelta, detailed: carved },
+    { label: "その他固定負債の増減", value: d("otherFixedLiab") },
+    { label: "退職給付引当金の増減", value: d("retirementBenefits") },
+    { label: "法人税等の支払額", value: -taxPaid, detailed: has("taxPaid") },
   ];
-  const subtotal = operatingItems.reduce((s, i) => s + i.value, 0);
-
-  // 利息・配当金の表示区分は継続適用を前提に選択できる
-  const afterSubtotalItems = [];
+  // 利息及び配当金の表示区分は継続適用を前提に選択できる
   if (!interestInFinancing) {
-    afterSubtotalItems.push(
+    operatingItems.push(
       { label: "利息及び配当金の受取額", value: intReceived, detailed: has("interestReceived") },
       { label: "利息の支払額", value: -intPaid, detailed: has("interestPaid") },
     );
   }
-  afterSubtotalItems.push({ label: "法人税等の支払額", value: -taxPaid, detailed: has("taxPaid") });
-  const operatingCF = subtotal + afterSubtotalItems.reduce((s, i) => s + i.value, 0);
+  const operatingCF = operatingItems.reduce((s, i) => s + i.value, 0);
 
   // --- Ⅱ 投資活動 ---
   // Δ有形固定資産 = 現金取得 + リース取得 − 減価償却費 − 売却簿価 − 減損 − 除却
   const bookValueSold = sup.saleProceeds - pl.gainOnSale;
   const tangibleAcquired = d("tangible") + pl.depreciation + bookValueSold
     + impairment + retirement - lease;
+  // その他の投資 = 投資その他の資産 + 預け金 + 現金同等物に含めない預金 の増減(すべて純額)
+  const otherInvesting = -(d("investments") + d("deposits") + d("cashExcluded"));
   const investingItems = [
-    { label: "有形固定資産の取得による支出", value: -tangibleAcquired },
-    { label: "有形固定資産の売却による収入", value: sup.saleProceeds },
-    { label: d("investments") >= 0 ? "投資その他の資産の取得による支出" : "投資その他の資産の減少による収入", value: -d("investments") },
-    { label: d("deposits") >= 0 ? "預け金の預入による支出" : "預け金の払戻による収入", value: -d("deposits") },
-    // 現金同等物に含めない預金への振替は投資活動になる
-    { label: d("cashExcluded") >= 0 ? "定期預金の預入による支出" : "定期預金の払戻による収入", value: -d("cashExcluded") },
+    { label: "固定資産の取得による支出", value: -tangibleAcquired },
+    { label: "固定資産の売却による収入", value: sup.saleProceeds },
+    { label: "その他の投資", value: otherInvesting },
   ];
   if (interestInFinancing) {
     investingItems.push({ label: "利息及び配当金の受取額", value: intReceived, detailed: true });
   }
   const investingCF = investingItems.reduce((s, i) => s + i.value, 0);
+  const freeCF = operatingCF + investingCF;
 
   // --- Ⅲ 財務活動 ---
   const gross = (proceedsKey, repaymentKey, net, name) => {
     if (!has(proceedsKey) && !has(repaymentKey)) return null;
     const proceeds = val(proceedsKey), repayment = val(repaymentKey);
     if (Math.abs((proceeds - repayment) - net) >= 0.5) {
-      notes.push(`${name}の総額(収入 ${fmt(proceeds)} − 支出 ${fmt(repayment)})がBSの増減 ${fmt(net)} と一致しないため、純額で表示しています。`);
+      notes.push(`${name}の総額(収入 ${fmt(proceeds)} − 支出 ${fmt(repayment)})がBSの増減 ${fmt(net)} と一致しないため、収支(純額)で表示しています。`);
       return null;
     }
     used.push(proceedsKey, repaymentKey);
@@ -258,8 +254,8 @@ function computeCF(data, provided = new Set(), policy = INTEREST_POLICY_DEFAULT)
 
   const shortNet = d("shortLoans");
   const longNet = d("longLoans") - lease; // リース債務は現金の借入れではない
-  const shortGross = gross("shortLoanProceeds", "shortLoanRepayment", shortNet, "短期借入金");
-  const longGross = gross("longLoanProceeds", "longLoanRepayment", longNet, "長期借入金");
+  const shortGross = gross("shortLoanProceeds", "shortLoanRepayment", shortNet, "短期借入債務");
+  const longGross = gross("longLoanProceeds", "longLoanRepayment", longNet, "長期借入債務");
 
   const financingItems = [];
   if (shortGross) {
@@ -268,7 +264,7 @@ function computeCF(data, provided = new Set(), policy = INTEREST_POLICY_DEFAULT)
       { label: "短期借入金の返済による支出", value: -shortGross.repayment, detailed: true },
     );
   } else {
-    financingItems.push({ label: "短期借入金の純増減額", value: shortNet });
+    financingItems.push({ label: "短期借入債務の収支", value: shortNet });
   }
   if (longGross) {
     financingItems.push(
@@ -276,34 +272,29 @@ function computeCF(data, provided = new Set(), policy = INTEREST_POLICY_DEFAULT)
       { label: "長期借入金の返済による支出", value: -longGross.repayment, detailed: true },
     );
   } else {
-    financingItems.push({
-      label: longNet >= 0 ? "長期借入れによる収入(純額)" : "長期借入金の返済による支出(純額)",
-      value: longNet,
-    });
+    financingItems.push({ label: "長期借入債務の収支", value: longNet });
   }
   if (interestInFinancing) {
     financingItems.push({ label: "利息の支払額", value: -intPaid, detailed: true });
   }
+  // その他の財務 = 株式の発行 − 自己株式の取得 + 自己株式の処分
   financingItems.push(
-    { label: "株式の発行による収入", value: ss.stockIssue },
-    { label: "自己株式の取得による支出", value: -ss.treasuryBuy },
-    { label: "自己株式の処分による収入", value: ss.treasurySell },
+    { label: "その他の財務", value: ss.stockIssue - ss.treasuryBuy + ss.treasurySell },
     { label: "配当金の支払額", value: -ss.dividendsPaid },
   );
   const financingCF = financingItems.reduce((s, i) => s + i.value, 0);
 
-  // --- Ⅳ 換算差額 / Ⅴ 増減額 ---
+  // --- 換算差額 / 増減額 ---
   const fxItems = fx !== 0 ? [{ label: "現金及び現金同等物に係る換算差額", value: fx, detailed: true }] : [];
   const netChange = operatingCF + investingCF + financingCF + fx;
-  // 現金同等物は「現金及び預金」から3か月超の預金などを除いたもの
   const beginningCash = bs.prev.cash - bs.prev.cashExcluded;
 
   return {
-    operatingItems, subtotal, afterSubtotalItems, operatingCF,
+    operatingItems, operatingCF,
     investingItems, investingCF,
+    freeCF,
     financingItems, financingCF,
     fxItems,
-    freeCF: operatingCF + investingCF,
     netChange, beginningCash, endingCash: beginningCash + netChange,
     nonCash: lease ? [{ label: "ファイナンスリースによる資産取得額", value: lease }] : [],
     notes, usedDetail: [...new Set(used)],
@@ -317,7 +308,8 @@ function computeCF(data, provided = new Set(), policy = INTEREST_POLICY_DEFAULT)
 function computeChecks({ bs, pl, ss }, cf) {
   const assets = (p) => bs[p].cash + bs[p].deposits + bs[p].receivables + bs[p].inventory +
     bs[p].otherCA + bs[p].tangible + bs[p].investments;
-  const liabilities = (p) => bs[p].payables + bs[p].shortLoans + bs[p].otherCL + bs[p].longLoans;
+  const liabilities = (p) => bs[p].payables + bs[p].shortLoans + bs[p].otherCL +
+    bs[p].longLoans + bs[p].otherFixedLiab + bs[p].retirementBenefits;
 
   const checks = [];
   const periods = cf ? [["prev", "期首"], ["curr", "期末"]] : [["curr", "期末"]];
@@ -856,29 +848,31 @@ function renderStatement(cf) {
     tr.append(td);
     table.append(tr);
   };
+  // 金額ゼロの明細行は省略(構造行は常に表示)
   const items = (list) => list.filter((i) => i.always || Math.abs(i.value) >= 0.005);
 
   row("head", "Ⅰ 営業活動によるキャッシュ・フロー", null);
   for (const i of items(cf.operatingItems)) row("item", i.label, i.value);
-  row("subtotal", "小計", cf.subtotal);
-  for (const i of items(cf.afterSubtotalItems)) row("item", i.label, i.value);
-  row("section-total", "営業活動によるキャッシュ・フロー", cf.operatingCF);
+  row("section-total", "営業活動によるキャッシュ・フロー 合計", cf.operatingCF);
 
   row("head", "Ⅱ 投資活動によるキャッシュ・フロー", null);
   for (const i of items(cf.investingItems)) row("item", i.label, i.value);
-  row("section-total", "投資活動によるキャッシュ・フロー", cf.investingCF);
+  row("section-total", "投資活動によるキャッシュ・フロー 合計", cf.investingCF);
+
+  row("free", "フリー・キャッシュ・フロー", cf.freeCF);
 
   row("head", "Ⅲ 財務活動によるキャッシュ・フロー", null);
   for (const i of items(cf.financingItems)) row("item", i.label, i.value);
-  row("section-total", "財務活動によるキャッシュ・フロー", cf.financingCF);
+  row("section-total", "財務活動によるキャッシュ・フロー 合計", cf.financingCF);
 
+  // 換算差額がある場合は3区分の外に置き、以降の番号を繰り下げる
   let n = 4;
-  for (const i of cf.fxItems) row("section-total", `Ⅳ ${i.label}`, i.value), n++;
-  row("grand", `${["Ⅳ", "Ⅴ"][n - 4]} 現金及び現金同等物の増減額`, cf.netChange);
-  row("grand", `${["Ⅴ", "Ⅵ"][n - 4]} 現金及び現金同等物の期首残高`, cf.beginningCash);
-  row("grand", `${["Ⅵ", "Ⅶ"][n - 4]} 現金及び現金同等物の期末残高`, cf.endingCash);
+  for (const i of cf.fxItems) { row("section-total", `Ⅳ ${i.label}`, i.value); n++; }
+  const num = (offset) => ["Ⅳ", "Ⅴ", "Ⅵ", "Ⅶ"][n - 4 + offset];
+  row("grand", `${num(0)} 現金及び現金同等物の増減額`, cf.netChange);
+  row("grand", `${num(1)} 現金及び現金同等物の期首残高`, cf.beginningCash);
+  row("grand", `${num(2)} 現金及び現金同等物の期末残高`, cf.endingCash);
 
-  // 非資金取引は現金の動きがないため本表に出さず、注記として別掲する
   if (cf.nonCash.length) {
     row("head", "(注記)重要な非資金取引", null);
     for (const i of cf.nonCash) row("item", i.label, i.value);
@@ -1144,12 +1138,11 @@ function lineValue(labels) {
   const ds = currentDataset();
   if (!ds || !ds.cf) return null;
   const all = [
-    ...ds.cf.operatingItems, ...ds.cf.afterSubtotalItems,
-    ...ds.cf.investingItems, ...ds.cf.financingItems,
-    { label: "小計", value: ds.cf.subtotal },
-    { label: "Ⅳ 現金及び現金同等物の増減額", value: ds.cf.netChange },
-    { label: "Ⅴ 現金及び現金同等物の期首残高", value: ds.cf.beginningCash },
-    { label: "Ⅵ 現金及び現金同等物の期末残高", value: ds.cf.endingCash },
+    ...ds.cf.operatingItems, ...ds.cf.investingItems, ...ds.cf.financingItems, ...ds.cf.fxItems,
+    { label: "フリー・キャッシュ・フロー", value: ds.cf.freeCF },
+    { label: "現金及び現金同等物の増減額", value: ds.cf.netChange },
+    { label: "現金及び現金同等物の期首残高", value: ds.cf.beginningCash },
+    { label: "現金及び現金同等物の期末残高", value: ds.cf.endingCash },
   ];
   const hit = all.find((i) => labels.includes(i.label));
   return hit ? hit.value : null;

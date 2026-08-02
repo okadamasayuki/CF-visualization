@@ -277,7 +277,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
     warnings.push("金額の列が1つしかありません。BSは前期末・当期末の2列が必要です(この列は当期末として読み込みます)。");
   }
 
-  // 同じ科目に複数行あれば合算する(例:受取手形 + 売掛金 → 売上債権)
+  // 同じ科目に複数行あれば合算する(例:受取手形 + 売掛金 → 営業債権)
   const seen = new Map();
   const unmatched = [];
   let matched = 0;    // 金額まで取り込めた科目の行数

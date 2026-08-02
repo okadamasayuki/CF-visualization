@@ -698,6 +698,12 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   border-top: 1px solid var(--baseline);
   font-weight: 700;
 }
+.statement tr.free td {
+  border-top: 1px solid var(--baseline);
+  border-bottom: 1px solid var(--baseline);
+  background: var(--accent-wash);
+  font-weight: 700;
+}
 .statement tr.grand td {
   border-top: 2px solid var(--text-primary);
   font-weight: 700;
