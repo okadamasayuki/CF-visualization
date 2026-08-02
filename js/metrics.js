@@ -53,15 +53,16 @@ function workingCapital(side) {
  * 1期分の指標を計算する。ROICの年換算は期をまたぐ情報が要るため、
  * ここでは NOPAT と投下資本までを求め、roic は finalizeROIC で埋める。
  */
-function computeBaseMetrics(data, cf) {
+function computeBaseMetrics(data, cf, provided = new Set()) {
   const { bs, pl } = data;
   const curr = bs.curr, prev = bs.prev;
 
   // 営業利益が未入力のCSVでも使えるよう、税引前利益と金融損益から推計する
-  const operatingIncome = pl.operatingIncome !== 0
+  const hasOperatingIncome = provided.has("pl:operatingIncome");
+  const operatingIncome = hasOperatingIncome
     ? pl.operatingIncome
     : pl.pretaxIncome + pl.interestExpense - pl.interestIncome;
-  const operatingIncomeEstimated = pl.operatingIncome === 0 && operatingIncome !== 0;
+  const operatingIncomeEstimated = !hasOperatingIncome;
 
   const ebitda = operatingIncome + pl.depreciation;
 

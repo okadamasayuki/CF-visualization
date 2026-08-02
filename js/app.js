@@ -28,6 +28,9 @@ const state = {
   dataAuto: true,     // 会社・四半期に対応するファイルを自動で開くか
   dataFilter: true,
   dataLimit: 200,
+  derivLine: 0,           // 算定ロジックで選択中のCF行
+  detailPreviewLimit: 20, // 詳細テンプレートのプレビュー行数
+  overrides: {},          // 画面で手入力した詳細情報(ファイルに残らないので別途保存)
 };
 
 const DATA_PAGE = 500; // 「さらに表示」で増やす行数
@@ -135,12 +138,48 @@ function currentDataset() {
  * CF計算(間接法)
  * ======================================================= */
 
-function computeCF({ bs, pl, sup, ss }) {
+/**
+ * 間接法によるCF計算。
+ *
+ * detail(詳細情報)が入力されている項目は、仮定をやめて実態に沿った表示に切り替える。
+ * ただし採用するのは「区分の合計と現金残高を変えない」組み替えだけなので、
+ * 詳細情報を足しても整合性チェックが崩れることはない。
+ *
+ * @param {object} data    emptyData() と同じ形
+ * @param {Set<string>} provided "detail:impairment" のように実際に入力があったキー
+ */
+function computeCF(data, provided = new Set()) {
+  const { bs, pl, sup, ss, detail } = data;
   const d = (key) => bs.curr[key] - bs.prev[key]; // 当期末 − 前期末
+  const has = (k) => provided.has(`detail:${k}`);
+  const val = (k) => (has(k) ? detail[k] : 0);
+  const notes = [];   // 詳細情報の採否についての注記
+  const used = [];    // 実際に採用した詳細情報のキー
 
+  // --- 非資金項目(入力があれば取得額の逆算から分離する) ---
+  const impairment = val("impairment");
+  const retirement = val("retirement");
+  const lease = val("leaseAcquisition");
+  if (impairment) used.push("impairment");
+  if (retirement) used.push("retirement");
+  if (lease) used.push("leaseAcquisition");
+
+  // --- 実際の受払額(入力がなければPLの発生額で代用) ---
+  const intReceived = has("interestReceived") ? detail.interestReceived : pl.interestIncome;
+  const intPaid = has("interestPaid") ? detail.interestPaid : pl.interestExpense;
+  const taxPaid = has("taxPaid") ? detail.taxPaid : pl.incomeTaxes;
+  for (const k of ["interestReceived", "interestPaid", "taxPaid"]) if (has(k)) used.push(k);
+  // 発生額と実際額の差は未収・未払の増減であり、運転資本の増減に既に含まれている。
+  // 二重計上を避けるため、小計の中で戻し入れる。
+  const accrualAdj = (pl.interestIncome - intReceived)
+    - (pl.interestExpense - intPaid) - (pl.incomeTaxes - taxPaid);
+
+  // --- Ⅰ 営業活動 ---
   const operatingItems = [
     { label: "税引前当期純利益", value: pl.pretaxIncome, always: true },
     { label: "減価償却費", value: pl.depreciation },
+    { label: "減損損失", value: impairment, detailed: true },
+    { label: "固定資産除却損", value: retirement, detailed: true },
     { label: "受取利息及び受取配当金", value: -pl.interestIncome },
     { label: "支払利息", value: pl.interestExpense },
     { label: pl.gainOnSale >= 0 ? "固定資産売却益" : "固定資産売却損", value: -pl.gainOnSale },
@@ -149,18 +188,21 @@ function computeCF({ bs, pl, sup, ss }) {
     { label: d("otherCA") >= 0 ? "その他流動資産の増加額" : "その他流動資産の減少額", value: -d("otherCA") },
     { label: d("payables") >= 0 ? "仕入債務の増加額" : "仕入債務の減少額", value: d("payables") },
     { label: d("otherCL") >= 0 ? "その他流動負債の増加額" : "その他流動負債の減少額", value: d("otherCL") },
+    { label: "未収・未払の増減による調整", value: accrualAdj, detailed: true },
   ];
   const subtotal = operatingItems.reduce((s, i) => s + i.value, 0);
   const afterSubtotalItems = [
-    { label: "利息及び配当金の受取額", value: pl.interestIncome },
-    { label: "利息の支払額", value: -pl.interestExpense },
-    { label: "法人税等の支払額", value: -pl.incomeTaxes },
+    { label: "利息及び配当金の受取額", value: intReceived, detailed: has("interestReceived") },
+    { label: "利息の支払額", value: -intPaid, detailed: has("interestPaid") },
+    { label: "法人税等の支払額", value: -taxPaid, detailed: has("taxPaid") },
   ];
   const operatingCF = subtotal + afterSubtotalItems.reduce((s, i) => s + i.value, 0);
 
-  // 売却簿価 = 売却収入 − 売却損益、取得額 = ΔPPE + 減価償却費 + 売却簿価
+  // --- Ⅱ 投資活動 ---
+  // Δ有形固定資産 = 現金取得 + リース取得 − 減価償却費 − 売却簿価 − 減損 − 除却
   const bookValueSold = sup.saleProceeds - pl.gainOnSale;
-  const tangibleAcquired = d("tangible") + pl.depreciation + bookValueSold;
+  const tangibleAcquired = d("tangible") + pl.depreciation + bookValueSold
+    + impairment + retirement - lease;
   const investingItems = [
     { label: "有形固定資産の取得による支出", value: -tangibleAcquired },
     { label: "有形固定資産の売却による収入", value: sup.saleProceeds },
@@ -169,14 +211,50 @@ function computeCF({ bs, pl, sup, ss }) {
   ];
   const investingCF = investingItems.reduce((s, i) => s + i.value, 0);
 
-  const financingItems = [
-    { label: "短期借入金の純増減額", value: d("shortLoans") },
-    { label: d("longLoans") >= 0 ? "長期借入れによる収入(純額)" : "長期借入金の返済による支出(純額)", value: d("longLoans") },
+  // --- Ⅲ 財務活動 ---
+  // 総額表示は「収入 − 支出」がBSの増減と一致するときだけ採用する
+  const gross = (proceedsKey, repaymentKey, net, name) => {
+    if (!has(proceedsKey) && !has(repaymentKey)) return null;
+    const proceeds = val(proceedsKey), repayment = val(repaymentKey);
+    if (Math.abs((proceeds - repayment) - net) >= 0.5) {
+      notes.push(`${name}の総額(収入 ${fmt(proceeds)} − 支出 ${fmt(repayment)})がBSの増減 ${fmt(net)} と一致しないため、純額で表示しています。`);
+      return null;
+    }
+    used.push(proceedsKey, repaymentKey);
+    return { proceeds, repayment };
+  };
+
+  const shortNet = d("shortLoans");
+  const longNet = d("longLoans") - lease; // リース債務は現金の借入れではない
+  const shortGross = gross("shortLoanProceeds", "shortLoanRepayment", shortNet, "短期借入金");
+  const longGross = gross("longLoanProceeds", "longLoanRepayment", longNet, "長期借入金");
+
+  const financingItems = [];
+  if (shortGross) {
+    financingItems.push(
+      { label: "短期借入れによる収入", value: shortGross.proceeds, detailed: true },
+      { label: "短期借入金の返済による支出", value: -shortGross.repayment, detailed: true },
+    );
+  } else {
+    financingItems.push({ label: "短期借入金の純増減額", value: shortNet });
+  }
+  if (longGross) {
+    financingItems.push(
+      { label: "長期借入れによる収入", value: longGross.proceeds, detailed: true },
+      { label: "長期借入金の返済による支出", value: -longGross.repayment, detailed: true },
+    );
+  } else {
+    financingItems.push({
+      label: longNet >= 0 ? "長期借入れによる収入(純額)" : "長期借入金の返済による支出(純額)",
+      value: longNet,
+    });
+  }
+  financingItems.push(
     { label: "株式の発行による収入", value: ss.stockIssue },
     { label: "自己株式の取得による支出", value: -ss.treasuryBuy },
     { label: "自己株式の処分による収入", value: ss.treasurySell },
     { label: "配当金の支払額", value: -ss.dividendsPaid },
-  ];
+  );
   const financingCF = financingItems.reduce((s, i) => s + i.value, 0);
 
   const netChange = operatingCF + investingCF + financingCF;
@@ -188,6 +266,9 @@ function computeCF({ bs, pl, sup, ss }) {
     financingItems, financingCF,
     freeCF: operatingCF + investingCF,
     netChange, beginningCash, endingCash: beginningCash + netChange,
+    // 非資金取引は注記として別掲する(現金の動きがないためCF本表には出ない)
+    nonCash: lease ? [{ label: "ファイナンスリースによる資産取得額", value: lease }] : [],
+    notes, usedDetail: [...new Set(used)],
   };
 }
 
@@ -1000,13 +1081,199 @@ function renderData() {
 }
 
 /* =========================================================
- * 算定ロジック(データに依存しない静的な説明)
+ * 算定ロジック(選択した行の算定元を図示する)
  * ======================================================= */
 
-/** BS・PL・SS・補足 が3区分にどう流れ込むかの概念図 */
+/** すべてのCF行を、区分つきの一覧で返す */
+function derivationLines() {
+  return DERIVATION.flatMap((sec) => sec.items.map((item) => ({ sec, item })));
+}
+
+/** 選択中のデータでこの行が実際にいくらだったか(なければ null) */
+function lineValue(labels) {
+  const ds = currentDataset();
+  if (!ds || !ds.cf) return null;
+  const all = [
+    ...ds.cf.operatingItems, ...ds.cf.afterSubtotalItems,
+    ...ds.cf.investingItems, ...ds.cf.financingItems,
+    { label: "小計", value: ds.cf.subtotal },
+    { label: "Ⅳ 現金及び現金同等物の増減額", value: ds.cf.netChange },
+    { label: "Ⅴ 現金及び現金同等物の期首残高", value: ds.cf.beginningCash },
+    { label: "Ⅵ 現金及び現金同等物の期末残高", value: ds.cf.endingCash },
+  ];
+  const hit = all.find((i) => labels.includes(i.label));
+  return hit ? hit.value : null;
+}
+
+/** data オブジェクトからパスで値を引く */
+function valueAtPath(data, path) {
+  return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), data);
+}
+
+/** 詳細情報が入っていればそちらの入力定義を使う */
+function activeInputs(item, provided) {
+  if (item.detailVariant && item.detailVariant.requires.every((k) => provided.has(`detail:${k}`))) {
+    return item.detailVariant.inputs;
+  }
+  return item.inputs || [];
+}
+
+function renderDerivationDiagram() {
+  const svg = document.getElementById("deriv-diagram");
+  svg.innerHTML = "";
+  const lines = derivationLines();
+  const picked = lines[state.derivLine] || lines[0];
+  if (!picked) return;
+  const { sec, item } = picked;
+
+  const ds = currentDataset();
+  const provided = ds ? ds.provided : new Set();
+  const inputs = activeInputs(item, provided);
+
+  document.getElementById("deriv-detail-note").hidden =
+    !(item.detailVariant && inputs === item.detailVariant.inputs);
+
+  const rows = item.computed ? [] : inputs;
+  const W = 720;
+  const ROW = 44, TOP = 56;
+  const H = Math.max(TOP + Math.max(rows.length, 1) * ROW + 24, 220);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+
+  const SX = 6, SW = 250;
+  const CX = 320, CW = 190;
+  const RX = 552, RW = 162;
+  const midY = TOP + (Math.max(rows.length, 1) * ROW) / 2 - ROW / 2;
+
+  const box = (x, y, w, h, cls, label, sub, value) => {
+    const g = svgEl("g", {});
+    g.append(svgEl("rect", { class: `flow-box ${cls}`, x, y, width: w, height: h, rx: 9 }));
+    const t = svgEl("text", { class: "flow-label", x: x + 12, y: y + (sub || value !== undefined ? 20 : h / 2 + 4) });
+    t.textContent = label;
+    g.append(t);
+    if (sub) {
+      const e = svgEl("text", { class: "flow-sub", x: x + 12, y: y + 35 });
+      e.textContent = sub;
+      g.append(e);
+    }
+    if (value !== undefined && value !== null) {
+      const v = svgEl("text", { class: "flow-value", x: x + w - 12, y: y + 35, "text-anchor": "end" });
+      v.textContent = fmt(value);
+      g.append(v);
+    }
+    svg.append(g);
+    return g;
+  };
+
+  // --- 入力側 ---
+  if (rows.length === 0) {
+    box(SX, midY, SW, 36, "sec", item.computed || "他の行から計算", null, undefined);
+    svg.append(svgEl("path", {
+      class: "flow-edge edge-calc",
+      d: `M${SX + SW},${midY + 18} C${(SX + SW + CX) / 2},${midY + 18} ${(SX + SW + CX) / 2},${midY + 22} ${CX},${midY + 22}`,
+    }));
+  }
+  rows.forEach((input, i) => {
+    const y = TOP + i * ROW;
+    const { kind, text } = describePath(input.path);
+    const raw = ds ? valueAtPath(ds.data, input.path) : null;
+    box(SX + 26, y, SW - 26, 36, `src-${kind}`, text, null, raw);
+
+    // 足すか引くかを、線の手前のバッジで明示する
+    const sign = svgEl("g", { class: `sign-badge ${input.sign > 0 ? "is-plus" : "is-minus"}` });
+    sign.append(svgEl("circle", { cx: SX + 12, cy: y + 18, r: 11 }));
+    const st = svgEl("text", { x: SX + 12, y: y + 22, "text-anchor": "middle" });
+    st.textContent = input.sign > 0 ? "+" : "−";
+    sign.append(st);
+    svg.append(sign);
+
+    const y1 = y + 18, y2 = midY + 22;
+    svg.append(svgEl("path", {
+      class: `flow-edge edge-${kind}`,
+      d: `M${SX + SW},${y1} C${(SX + SW + CX) / 2},${y1} ${(SX + SW + CX) / 2},${y2} ${CX},${y2}`,
+    }));
+  });
+
+  // --- 選択中の行 ---
+  box(CX, midY, CW, 44, "result", item.labels[0], item.labels[1] ? `/ ${item.labels[1]}` : null,
+    lineValue(item.labels));
+
+  // --- 反映先 ---
+  const secTotal = { operating: "営業CF", investing: "投資CF", financing: "財務CF", result: "現金及び現金同等物" }[sec.id];
+  const secValue = ds && ds.cf
+    ? { operating: ds.cf.operatingCF, investing: ds.cf.investingCF, financing: ds.cf.financingCF, result: ds.cf.endingCash }[sec.id]
+    : null;
+  svg.append(svgEl("path", {
+    class: "flow-edge edge-calc",
+    d: `M${CX + CW},${midY + 22} C${(CX + CW + RX) / 2},${midY + 22} ${(CX + CW + RX) / 2},${midY + 22} ${RX},${midY + 22}`,
+  }));
+  box(RX, midY, RW, 44, "sec", secTotal, sec.id === "result" ? null : "に合算", secValue);
+
+  // --- 見出し ---
+  for (const [x, w, label] of [[SX, SW, "算定に使う項目"], [CX, CW, "CF計算書の行"], [RX, RW, "反映先"]]) {
+    const t = svgEl("text", { class: "flow-head", x: x + w / 2, y: 26, "text-anchor": "middle" });
+    t.textContent = label;
+    svg.append(t);
+  }
+}
+
+function renderDerivationPicker() {
+  const select = document.getElementById("deriv-line-select");
+  if (select.options.length) return;
+  let index = 0;
+  for (const sec of DERIVATION) {
+    const group = el("optgroup", { label: sec.title });
+    for (const item of sec.items) {
+      group.append(el("option", { value: String(index), text: item.labels.join(" / ") }));
+      index++;
+    }
+    select.append(group);
+  }
+  select.value = String(state.derivLine);
+}
+
+function renderDerivationText() {
+  const wrap = document.getElementById("deriv-line-text");
+  wrap.innerHTML = "";
+  const picked = derivationLines()[state.derivLine];
+  if (!picked) return;
+  const { item } = picked;
+  const ds = currentDataset();
+  const provided = ds ? ds.provided : new Set();
+  const inputs = activeInputs(item, provided);
+
+  const formula = el("div", { class: "deriv-formula" });
+  if (item.computed) {
+    formula.append(el("span", { class: "deriv-chip chip-calc" },
+      el("span", { class: "chip-dot", "aria-hidden": "true" }),
+      el("span", { class: "chip-text", text: item.computed })));
+  }
+  inputs.forEach((input, i) => {
+    const { kind, text } = describePath(input.path);
+    formula.append(el("span", { class: "deriv-op", text: input.sign > 0 ? (i === 0 ? "" : "+") : "−" }));
+    formula.append(el("span", { class: `deriv-chip chip-${kind}` },
+      el("span", { class: "chip-dot", "aria-hidden": "true" }),
+      el("span", { class: "chip-kind", text: SOURCE_KINDS[kind].label }),
+      el("span", { class: "chip-text", text })));
+  });
+  wrap.append(formula);
+
+  if (item.note) wrap.append(el("p", { class: "deriv-note", text: item.note }));
+  if (item.assumption) {
+    wrap.append(el("p", { class: "deriv-assumption" },
+      el("span", { class: "icon", text: "!" }),
+      el("span", { text: item.assumption })));
+  }
+  if (item.requires) {
+    wrap.append(el("p", { class: "deriv-note", text:
+      `この行は詳細情報(${item.requires.map((k) => DISPLAY_FIELDS.detail.find((f) => f.key === k).label).join("、")})を入力したときだけ表示されます。` }));
+  }
+}
+
+/** BS・PL・SS・補足が3区分に流れ込む全体像(静的) */
 function renderFlowDiagram() {
   const svg = document.getElementById("flow-diagram");
-  if (svg.childElementCount > 0) return; // 静的なので一度だけ描く
+  if (svg.childElementCount > 0) return;
   const W = 720, H = 300;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
 
@@ -1014,18 +1281,17 @@ function renderFlowDiagram() {
     { kind: "bs", id: "bs", label: "貸借対照表(BS)", sub: "期首・期末の残高", y: 16 },
     { kind: "pl", id: "pl", label: "損益計算書(PL)", sub: "当四半期の損益", y: 84 },
     { kind: "ss", id: "ss", label: "株主資本等変動計算書(SS)", sub: "資本取引", y: 152 },
-    { kind: "sup", id: "sup", label: "補足情報", sub: "固定資産の売却収入", y: 220 },
+    { kind: "detail", id: "detail", label: "補足・詳細情報", sub: "3表の外の任意入力", y: 220 },
   ];
   const sections = [
-    { id: "op", label: "営業CF", y: 24, from: ["bs", "pl"] },
-    { id: "inv", label: "投資CF", y: 110, from: ["bs", "pl", "sup"] },
-    { id: "fin", label: "財務CF", y: 196, from: ["bs", "ss"] },
+    { id: "op", label: "営業CF", y: 24, from: ["bs", "pl", "detail"] },
+    { id: "inv", label: "投資CF", y: 110, from: ["bs", "pl", "detail"] },
+    { id: "fin", label: "財務CF", y: 196, from: ["bs", "ss", "detail"] },
   ];
   const SX = 8, SW = 196, SH = 54;
   const CX = 320, CW = 132, CH = 54;
   const RX = 528, RW = 184, RH = 92, RY = 104;
 
-  // --- 接続線(源泉 → 区分) ---
   for (const sec of sections) {
     for (const id of sec.from) {
       const src = sources.find((s) => s.id === id);
@@ -1037,7 +1303,6 @@ function renderFlowDiagram() {
         d: `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`,
       }));
     }
-    // 区分 → 期末残高
     svg.append(svgEl("path", {
       class: "flow-edge edge-calc",
       d: `M${CX + CW},${sec.y + CH / 2} C${CX + CW + 40},${sec.y + CH / 2} ${RX - 40},${RY + RH / 2} ${RX},${RY + RH / 2}`,
@@ -1051,104 +1316,251 @@ function renderFlowDiagram() {
     t.textContent = label;
     g.append(t);
     if (sub) {
-      const s = svgEl("text", { class: "flow-sub", x: x + 14, y: y + 40 });
-      s.textContent = sub;
-      g.append(s);
+      const e = svgEl("text", { class: "flow-sub", x: x + 14, y: y + 40 });
+      e.textContent = sub;
+      g.append(e);
     }
     svg.append(g);
   };
 
-  for (const s of sources) {
-    box(SX, s.y, SW, SH, `src-${s.kind}`, s.label, s.sub);
-    svg.append(svgEl("circle", { class: `flow-dot dot-${s.kind}`, cx: SX + 6, cy: s.y + SH / 2, r: 0 }));
-  }
+  for (const s of sources) box(SX, s.y, SW, SH, `src-${s.kind}`, s.label, s.sub);
   for (const sec of sections) box(CX, sec.y, CW, CH, "sec", sec.label, null);
   box(RX, RY, RW, RH, "result", "現金及び現金同等物", "の期末残高");
 }
 
-function renderDerivation() {
-  renderFlowDiagram();
-  const wrap = document.getElementById("derivation-body");
-  if (wrap.childElementCount > 0) return; // 静的なので一度だけ描く
+function renderAssumptions() {
+  const wrap = document.getElementById("assumption-body");
+  if (wrap.childElementCount > 0) return;
 
-  for (const section of DERIVATION) {
-    const card = el("div", { class: "card deriv-card" });
-    card.append(el("h3", { text: section.title }));
-    card.append(el("p", { class: "table-hint", text: section.lead }));
-
-    for (const item of section.items) {
-      const row = el("div", { class: `deriv-row${item.subtotal ? " is-subtotal" : ""}` });
-      const name = el("div", { class: "deriv-name" });
-      // 条件で行名が変わるものは「/」で併記する
-      name.append(item.labels.join(" / "));
-      row.append(name);
-
-      const formula = el("div", { class: "deriv-formula" });
-      for (const token of item.formula) {
-        if (token.type === "op") {
-          formula.append(el("span", { class: "deriv-op", text: token.text }));
-        } else {
-          const c = el("span", { class: `deriv-chip chip-${token.kind}` });
-          c.append(
-            el("span", { class: "chip-dot", "aria-hidden": "true" }),
-            el("span", { class: "chip-kind", text: SOURCE_KINDS[token.kind].label }),
-            el("span", { class: "chip-text", text: token.text }),
-          );
-          formula.append(c);
-        }
-      }
-      row.append(formula);
-
-      if (item.note) row.append(el("p", { class: "deriv-note", text: item.note }));
-      if (item.assumption) {
-        row.append(el("p", { class: "deriv-assumption" },
-          el("span", { class: "icon", text: "!" }),
-          el("span", { text: item.assumption }),
-        ));
-      }
-      card.append(row);
-    }
-    wrap.append(card);
-  }
-
-  // --- 簡便法の仮定 ---
-  const notes = el("div", { class: "card" });
-  notes.append(el("h3", { text: "簡便法としての仮定" }));
-  notes.append(el("p", {
-    class: "table-hint",
-    text: "BS・PL・SSだけではCF計算書は作れません。足りない情報を次の仮定で埋めています。",
-  }));
   for (const a of ASSUMPTIONS) {
-    notes.append(el("div", { class: `assumption level-${a.level}` },
+    const div = el("div", { class: `assumption level-${a.level}` },
       el("div", { class: "assumption-head" },
         el("span", { class: "assumption-badge", text: a.level === "critical" ? "重要" : a.level === "high" ? "影響大" : "影響中" }),
         el("span", { class: "assumption-title", text: a.title }),
       ),
       el("p", { class: "assumption-body", text: a.body }),
-    ));
+    );
+    if (a.fix) {
+      div.append(el("p", { class: "assumption-fix" },
+        el("span", { class: "icon", text: "→" }),
+        el("span", { text: a.fix }),
+      ));
+    }
+    wrap.append(div);
   }
-  wrap.append(notes);
-
-  // --- 本来必要な情報 ---
-  const missing = el("div", { class: "card" });
-  missing.append(el("h3", { text: "正確に作るために本来必要な情報(現在は未対応)" }));
-  missing.append(el("p", {
-    class: "table-hint",
-    text: "これらはCSVの入力項目がなく、上記の仮定で代用しています。",
-  }));
-  const table = el("table", { class: "data-table" });
-  const tbody = el("tbody");
-  for (const g of MISSING_INPUTS) {
-    tbody.append(el("tr", {},
-      el("td", { class: "label", text: g.group }),
-      el("td", { text: g.items.join("、") }),
-    ));
-  }
-  table.append(tbody);
-  missing.append(table);
-  wrap.append(missing);
 }
 
+function renderDerivation() {
+  renderFlowDiagram();
+  renderDerivationPicker();
+  renderAssumptions();
+  renderDerivationDiagram();
+  renderDerivationText();
+}
+
+/* =========================================================
+ * 詳細入力
+ * ======================================================= */
+
+/** 詳細情報だけのテンプレートCSV(読み込み済みの会社×四半期分) */
+function buildDetailTemplate() {
+  const lines = ["会社名,四半期,区分,科目,金額"];
+  const q = (s) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  const targets = state.datasets.length
+    ? state.datasets
+    : [{ company: "A社", period: { label: "2025Q1" }, data: null, provided: new Set() }];
+  for (const ds of targets) {
+    for (const f of DISPLAY_FIELDS.detail) {
+      const v = ds.data && ds.provided.has(`detail:${f.key}`) ? ds.data.detail[f.key] : "";
+      lines.push(`${q(ds.company)},${q(ds.period.label)},詳細,${f.label},${v}`);
+    }
+  }
+  return lines.join("\r\n") + "\r\n";
+}
+
+function renderDetailPanel() {
+  const ds = currentDataset();
+  document.getElementById("detail-subject").textContent = ds ? `${ds.company} / ${ds.period.label}` : "";
+
+  // --- 入力フォーム ---
+  const form = document.getElementById("detail-form");
+  form.innerHTML = "";
+  let lastGroup = null;
+  for (const f of DISPLAY_FIELDS.detail) {
+    if (f.group !== lastGroup) {
+      lastGroup = f.group;
+      const info = DETAIL_GROUPS.find((g) => g.group === f.group);
+      const head = el("div", { class: "detail-group" });
+      head.append(el("h4", { text: f.group }));
+      if (info) {
+        head.append(el("p", { class: "detail-lead", text: info.lead }));
+        head.append(el("p", { class: "detail-effect", text: info.effect }));
+      }
+      form.append(head);
+    }
+    const has = ds && ds.provided.has(`detail:${f.key}`);
+    const row = el("div", { class: `detail-row${has ? " is-set" : ""}` });
+    const input = el("input", {
+      type: "number", step: "any", inputmode: "decimal",
+      id: `detail-${f.key}`, placeholder: "未入力", "aria-label": f.label,
+    });
+    if (has) input.value = String(ds.data.detail[f.key]);
+    input.disabled = !ds;
+    input.addEventListener("input", () => setDetailValue(f.key, input.value));
+    row.append(
+      el("label", { class: "detail-label", for: `detail-${f.key}`, text: f.label }),
+      input,
+      el("span", { class: "detail-state", text: has ? "反映中" : "" }),
+    );
+    form.append(row);
+  }
+
+  // --- 反映状況 ---
+  const status = document.getElementById("detail-status");
+  status.innerHTML = "";
+  if (ds && ds.cf) {
+    const used = ds.cf.usedDetail;
+    status.append(el("span", {
+      class: used.length ? "detail-applied" : "detail-none",
+      text: used.length
+        ? `${used.length}件の詳細情報を反映しています: ` +
+          used.map((k) => DISPLAY_FIELDS.detail.find((f) => f.key === k).label).join("、")
+        : "この会社・四半期には詳細情報が入力されていません(すべて簡便法の仮定で算定)。",
+    }));
+    for (const n of ds.cf.notes) {
+      status.append(el("div", { class: "message warn" },
+        el("span", { class: "icon", text: "!" }), el("span", { text: n })));
+    }
+  }
+
+  // --- テンプレートのプレビュー ---
+  renderDetailPreview();
+}
+
+function renderDetailPreview() {
+  const table = document.getElementById("detail-preview");
+  table.innerHTML = "";
+  const rows = parseDelimited(buildDetailTemplate(), ",");
+  const header = rows[0];
+  const body = rows.slice(1, 1 + state.detailPreviewLimit);
+
+  const htr = el("tr");
+  htr.append(el("th", { class: "rownum", scope: "col", text: "行" }));
+  for (const h of header) htr.append(el("th", { scope: "col", text: h }));
+  table.append(el("thead", {}, htr));
+
+  const tbody = el("tbody");
+  body.forEach((r, i) => {
+    const tr = el("tr");
+    tr.append(el("th", { class: "rownum", scope: "row", text: String(i + 2) }));
+    for (let c = 0; c < header.length; c++) {
+      const raw = (r[c] || "").trim();
+      tr.append(el("td", {
+        class: raw === "" ? "empty" : isAmountLike(raw) ? "numeric" : "",
+        text: raw === "" ? "(ここに記入)" : raw,
+      }));
+    }
+    tbody.append(tr);
+  });
+  table.append(tbody);
+
+  const total = rows.length - 1;
+  document.getElementById("detail-preview-count").textContent =
+    `${total.toLocaleString("ja-JP")}行(${body.length.toLocaleString("ja-JP")}行を表示)`;
+  document.getElementById("detail-preview-more").hidden = body.length >= total;
+}
+
+/** フォームの入力を、選択中の会社・四半期に反映する */
+function setDetailValue(key, raw) {
+  const ds = currentDataset();
+  if (!ds) return;
+  const trimmed = String(raw).trim();
+  const slot = `detail:${key}`;
+  if (trimmed === "") {
+    ds.provided.delete(slot);
+    ds.data.detail[key] = 0;
+  } else {
+    const v = Number(trimmed);
+    if (!Number.isFinite(v)) return;
+    ds.data.detail[key] = Math.abs(v); // 詳細情報はすべて正の値で扱う
+    ds.provided.add(slot);
+  }
+  // 手入力はファイルに残らないので、別途保存して復元できるようにする
+  const overrideKey = keyOf(ds.company, ds.period.label);
+  const o = state.overrides[overrideKey] || (state.overrides[overrideKey] = {});
+  if (trimmed === "") delete o[key]; else o[key] = ds.data.detail[key];
+  if (Object.keys(o).length === 0) delete state.overrides[overrideKey];
+
+  recomputeDataset(ds);
+  saveState();
+  renderAll();
+  if (state.tab === "detail") {
+    document.getElementById("detail-status").innerHTML = "";
+    renderDetailPanel();
+    document.getElementById(`detail-${key}`).focus();
+  }
+}
+
+/** 1件のデータセットだけ計算し直す(ROICは系列全体に影響するので再計算する) */
+function recomputeDataset(ds) {
+  ds.cf = ds.cfAvailable ? computeCF(ds.data, ds.provided) : null;
+  ds.checks = computeChecks(ds.data, ds.cf);
+  ds.metrics = computeBaseMetrics(ds.data, ds.cf, ds.provided);
+  const series = state.byCompany.get(ds.company);
+  if (series) finalizeROIC(series);
+}
+
+/** 詳細情報CSVを既存データに上書きで取り込む */
+async function handleDetailFiles(fileList) {
+  const files = [...fileList];
+  if (files.length === 0) return;
+  const messages = [];
+  let applied = 0;
+  const unmatched = [];
+
+  for (const f of files) {
+    const text = await decodeFile(f);
+    const result = parseFinancialCSV(text, baseName(f.name));
+    for (const parsed of result.datasets) {
+      const target = state.byKey.get(keyOf(parsed.company, parsed.period.label));
+      if (!target) { unmatched.push(`${parsed.company} / ${parsed.period.label}`); continue; }
+      let touched = false;
+      for (const field of SCHEMA.detail) {
+        const slot = `detail:${field.key}`;
+        if (!parsed.provided.has(slot)) continue;
+        target.data.detail[field.key] = parsed.data.detail[field.key];
+        target.provided.add(slot);
+        const o = state.overrides[keyOf(target.company, target.period.label)]
+          || (state.overrides[keyOf(target.company, target.period.label)] = {});
+        o[field.key] = parsed.data.detail[field.key];
+        touched = true;
+      }
+      if (touched) { recomputeDataset(target); applied++; }
+    }
+    messages.push(...result.errors, ...result.warnings);
+  }
+
+  const status = document.getElementById("detail-upload-status");
+  status.hidden = false;
+  if (applied === 0) {
+    status.className = "file-status ng";
+    status.textContent = "詳細情報を反映できませんでした。会社名と四半期が読み込み済みのデータと一致しているかご確認ください。";
+  } else {
+    status.className = "file-status ok";
+    status.textContent = `${applied}件の会社・四半期に詳細情報を反映しました。`
+      + (unmatched.length ? `(${unmatched.length}件は該当データがないため読み飛ばしました)` : "");
+  }
+  if (unmatched.length) messages.push(`該当するデータがない指定: ${unmatched.slice(0, 5).join("、")}${unmatched.length > 5 ? " ほか" : ""}`);
+  if (messages.length) renderMessages([], messages);
+
+  saveState();
+  renderAll();
+  renderDetailPanel();
+}
+
+/* =========================================================
+ * タブ
+ * ======================================================= */
 /* =========================================================
  * タブ
  * ======================================================= */
@@ -1159,6 +1571,7 @@ const TABS = [
   { id: "cf" },
   { id: "overview", needs: () => state.companies.length > 1 },
   { id: "data" },
+  { id: "detail" },
   { id: "logic" },
 ];
 
@@ -1182,6 +1595,7 @@ function selectTab(id) {
   if (id === "trend") renderTrend();
   if (id === "overview") { renderOverviewChart(); renderOverviewTable(); }
   if (id === "logic") renderDerivation();
+  if (id === "detail") renderDetailPanel();
 }
 
 function renderTabs() {
@@ -1267,6 +1681,8 @@ function renderAll() {
     renderOverviewTable();
   }
 
+  if (state.tab === "logic") { renderDerivationDiagram(); renderDerivationText(); }
+  if (state.tab === "detail") renderDetailPanel();
   renderTabs();
 }
 
@@ -1281,6 +1697,15 @@ function showEmptyState() {
 /* =========================================================
  * 読み込み
  * ======================================================= */
+
+/** 読み込んだファイルと手入力の詳細情報をまとめて保存する */
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      sources: state.sources, overrides: state.overrides,
+    }));
+  } catch (_) { /* 容量超過などで保存できなくても動作に影響はない */ }
+}
 
 function baseName(filename) {
   return filename.replace(/\.[^.]+$/, "") || filename;
@@ -1349,9 +1774,9 @@ function buildState(datasets, warnings) {
         derived++;
       }
       d.cfAvailable = d.hasPrev || !!d.derivedPrev;
-      d.cf = d.cfAvailable ? computeCF(d.data) : null;
+      d.cf = d.cfAvailable ? computeCF(d.data, d.provided) : null;
       d.checks = computeChecks(d.data, d.cf);
-      d.metrics = computeBaseMetrics(d.data, d.cf);
+      d.metrics = computeBaseMetrics(d.data, d.cf, d.provided);
       if (!d.cfAvailable) noPrev++;
     });
     finalizeROIC(series);
@@ -1373,6 +1798,22 @@ function buildState(datasets, warnings) {
     if (fallback) state.company = fallback;
   }
   state.sort = { key: null, dir: 1 };
+}
+
+/** 画面で手入力した詳細情報を、読み込み直したデータに再適用する */
+function applyOverrides() {
+  let applied = 0;
+  for (const [key, fields] of Object.entries(state.overrides)) {
+    const ds = state.byKey.get(key);
+    if (!ds) continue;
+    for (const [k, v] of Object.entries(fields)) {
+      ds.data.detail[k] = v;
+      ds.provided.add(`detail:${k}`);
+    }
+    recomputeDataset(ds);
+    applied++;
+  }
+  return applied;
 }
 
 function applySources(sources) {
@@ -1400,6 +1841,7 @@ function applySources(sources) {
         for (const k of Object.keys(acc.data[section])) acc.data[section][k] += ds.data[section][k];
       }
       acc.hasPrev = acc.hasPrev || ds.hasPrev;
+      for (const k of ds.provided) acc.provided.add(k);
     }
   }
 
@@ -1419,6 +1861,7 @@ function applySources(sources) {
   }
 
   buildState([...merged.values()], warnings);
+  applyOverrides();
   state.sources = sources;
   state.previews = new Map();
   state.dataFile = 0;
@@ -1433,9 +1876,7 @@ function applySources(sources) {
   renderSelectors();
   renderAll();
 
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sources));
-  } catch (_) { /* 容量超過などで保存できなくても動作に影響はない */ }
+  saveState();
 }
 
 async function handleFiles(fileList) {
@@ -1459,6 +1900,7 @@ async function handleFiles(fileList) {
 function clearAll() {
   state.datasets = [];
   state.sources = [];
+  state.overrides = {};
   document.getElementById("file-input").value = "";
   document.getElementById("file-status").hidden = true;
   const messages = document.getElementById("messages");
@@ -1494,7 +1936,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   for (const type of ["dragover", "drop"]) {
     document.addEventListener(type, (ev) => {
-      if (!dropzone.contains(ev.target)) ev.preventDefault();
+      const dz = document.getElementById("detail-dropzone");
+      if (!dropzone.contains(ev.target) && !(dz && dz.contains(ev.target))) ev.preventDefault();
     });
   }
 
@@ -1563,6 +2006,35 @@ document.addEventListener("DOMContentLoaded", () => {
     state.dataLimit = 200;
     renderData();
   });
+  // --- 算定ロジックタブ ---
+  document.getElementById("deriv-line-select").addEventListener("change", (ev) => {
+    state.derivLine = Number(ev.target.value);
+    renderDerivationDiagram();
+    renderDerivationText();
+  });
+
+  // --- 詳細入力タブ ---
+  document.getElementById("btn-detail-template")
+    .addEventListener("click", () => downloadText("cf-detail-template.csv", buildDetailTemplate()));
+  document.getElementById("detail-preview-more").addEventListener("click", () => {
+    state.detailPreviewLimit += 50;
+    renderDetailPreview();
+  });
+  const detailInput = document.getElementById("detail-file-input");
+  detailInput.addEventListener("change", () => handleDetailFiles(detailInput.files));
+  const detailZone = document.getElementById("detail-dropzone");
+  for (const type of ["dragenter", "dragover"]) {
+    detailZone.addEventListener(type, (ev) => { ev.preventDefault(); detailZone.classList.add("is-over"); });
+  }
+  for (const type of ["dragleave", "dragend"]) {
+    detailZone.addEventListener(type, () => detailZone.classList.remove("is-over"));
+  }
+  detailZone.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    detailZone.classList.remove("is-over");
+    handleDetailFiles(ev.dataTransfer.files);
+  });
+
   document.getElementById("data-more").addEventListener("click", () => {
     state.dataLimit += DATA_PAGE;
     renderData();
@@ -1583,6 +2055,9 @@ document.addEventListener("DOMContentLoaded", () => {
   try {
     for (const k of OBSOLETE_STORAGE_KEYS) localStorage.removeItem(k);
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (Array.isArray(saved) && saved.length) applySources(saved);
+    if (saved && Array.isArray(saved.sources) && saved.sources.length) {
+      state.overrides = saved.overrides && typeof saved.overrides === "object" ? saved.overrides : {};
+      applySources(saved.sources);
+    }
   } catch (_) { /* 無視 */ }
 });

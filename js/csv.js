@@ -290,7 +290,8 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
   const datasetFor = (company, period) => {
     const key = `${company}\u0000${period.label}`;
     if (!datasets.has(key)) {
-      datasets.set(key, { company, period, data: emptyData(), hasPrev: false });
+      // provided は「CSVに実際に値があったか」の記録。実額0と未入力を区別するために使う
+      datasets.set(key, { company, period, data: emptyData(), hasPrev: false, provided: new Set() });
     }
     return datasets.get(key);
   };
@@ -340,6 +341,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
       const slot = `${companyName}\u0000${period.label}\u0000${target.section}:${target.key}:${which}`;
       bucket[target.key] = (seen.has(slot) ? bucket[target.key] : 0) + v;
       seen.set(slot, true);
+      dataset.provided.add(`${target.section}:${target.key}`);
       return true;
     };
 

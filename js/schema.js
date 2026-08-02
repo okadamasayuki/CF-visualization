@@ -67,6 +67,30 @@ const SCHEMA = {
       aliases: ["固定資産売却収入", "有形固定資産売却収入", "固定資産の売却による収入", "売却収入"] },
   ],
 
+  // 詳細情報: 入力すると簡便法の仮定を減らせる。すべて任意・正の値
+  detail: [
+    { key: "shortLoanProceeds", label: "短期借入れによる収入", absolute: true, group: "総額表示",
+      aliases: ["短期借入による収入", "短期借入金の借入による収入"] },
+    { key: "shortLoanRepayment", label: "短期借入金の返済による支出", absolute: true, group: "総額表示",
+      aliases: ["短期借入の返済による支出"] },
+    { key: "longLoanProceeds", label: "長期借入れによる収入", absolute: true, group: "総額表示",
+      aliases: ["長期借入による収入", "長期借入金の借入による収入"] },
+    { key: "longLoanRepayment", label: "長期借入金の返済による支出", absolute: true, group: "総額表示",
+      aliases: ["長期借入の返済による支出"] },
+    { key: "impairment", label: "減損損失", absolute: true, group: "非資金項目",
+      aliases: ["減損損失額", "固定資産減損損失"] },
+    { key: "retirement", label: "固定資産除却損(除却簿価)", absolute: true, group: "非資金項目",
+      aliases: ["固定資産除却損", "除却損", "固定資産除却額"] },
+    { key: "leaseAcquisition", label: "ファイナンスリースによる資産取得額", absolute: true, group: "非資金項目",
+      aliases: ["リース資産の取得額", "ファイナンスリース取引による資産取得"] },
+    { key: "interestReceived", label: "利息及び配当金の受取額(実額)", absolute: true, group: "実際の受払額",
+      aliases: ["利息の受取額", "利息及び配当金の受取額実績"] },
+    { key: "interestPaid", label: "利息の支払額(実額)", absolute: true, group: "実際の受払額",
+      aliases: ["利息の支払額実績"] },
+    { key: "taxPaid", label: "法人税等の支払額(実額)", absolute: true, group: "実際の受払額",
+      aliases: ["法人税等の納付額", "法人税等の支払額実績"] },
+  ],
+
   // SS: 当期のみ(すべて正の値で入力)
   ss: [
     { key: "stockIssue", label: "新株の発行(増資)", absolute: true,
@@ -86,6 +110,7 @@ const DISPLAY_FIELDS = {
   pl: SCHEMA.pl.filter((f) => !f.aliasOnly),
   sup: SCHEMA.sup.filter((f) => !f.aliasOnly),
   ss: SCHEMA.ss.filter((f) => !f.aliasOnly),
+  detail: SCHEMA.detail.filter((f) => !f.aliasOnly),
 };
 
 const SECTION_LABELS = {
@@ -93,14 +118,16 @@ const SECTION_LABELS = {
   pl: "PL",
   sup: "補足",
   ss: "SS",
+  detail: "詳細",
 };
 
 /** 空の入力データ(すべて0)を作る */
 function emptyData() {
-  const data = { bs: { prev: {}, curr: {} }, pl: {}, sup: {}, ss: {} };
+  const data = { bs: { prev: {}, curr: {} }, pl: {}, sup: {}, ss: {}, detail: {} };
   for (const f of SCHEMA.bs) { data.bs.prev[f.key] = 0; data.bs.curr[f.key] = 0; }
   for (const f of SCHEMA.pl) data.pl[f.key] = 0;
   for (const f of SCHEMA.sup) data.sup[f.key] = 0;
   for (const f of SCHEMA.ss) data.ss[f.key] = 0;
+  for (const f of SCHEMA.detail) data.detail[f.key] = 0;
   return data;
 }

@@ -83,6 +83,8 @@
               aria-controls="panel-overview" aria-selected="false" tabindex="-1">全社比較</button>
       <button type="button" class="tab" role="tab" id="tab-data" data-tab="data"
               aria-controls="panel-data" aria-selected="false" tabindex="-1">データ</button>
+      <button type="button" class="tab" role="tab" id="tab-detail" data-tab="detail"
+              aria-controls="panel-detail" aria-selected="false" tabindex="-1">詳細入力</button>
       <button type="button" class="tab" role="tab" id="tab-logic" data-tab="logic"
               aria-controls="panel-logic" aria-selected="false" tabindex="-1">算定ロジック</button>
     </div>
@@ -224,26 +226,89 @@
     </section>
 
     <!-- ===== 算定ロジック ===== -->
+    <!-- ===== 詳細入力 ===== -->
+    <section id="panel-detail" class="panel" role="tabpanel" aria-labelledby="tab-detail" tabindex="0" hidden>
+      <div class="card">
+        <h3>詳細情報を入れて精度を上げる <span id="detail-subject" class="count-badge"></span></h3>
+        <p class="table-hint">
+          BS・PL・SSだけでは足りない情報を補うと、簡便法の仮定を減らせます。
+          ここで採用するのは<strong>区分の合計と現金残高を変えない組み替えだけ</strong>なので、
+          詳細情報を入れても整合性チェックが崩れることはありません。
+        </p>
+        <div id="detail-status" class="detail-status"></div>
+        <div id="detail-form" class="detail-form"></div>
+      </div>
+
+      <div class="card">
+        <h3>フォーマットをダウンロードして一括で入れる</h3>
+        <p class="table-hint">
+          読み込み済みの会社・四半期をすべて並べたCSVを出力します。金額欄に記入してアップロードすると、
+          会社名と四半期が一致する行に反映します(既存のBS・PL・SSはそのまま残ります)。
+        </p>
+        <div class="toolbar">
+          <button id="btn-detail-template" type="button" class="btn btn-secondary">詳細情報のテンプレートCSVをダウンロード</button>
+        </div>
+
+        <h4 class="section-gap">テンプレートのプレビュー <span id="detail-preview-count" class="count-badge"></span></h4>
+        <div class="table-scroll sheet-scroll">
+          <table class="sheet" id="detail-preview"></table>
+        </div>
+        <div class="sheet-foot">
+          <button id="detail-preview-more" type="button" class="btn" hidden>さらに50行を表示</button>
+        </div>
+
+        <h4 class="section-gap">記入したCSVをアップロード</h4>
+        <label id="detail-dropzone" class="dropzone dropzone-compact" for="detail-file-input">
+          <input type="file" id="detail-file-input" accept=".csv,.tsv,.txt,text/csv" multiple hidden>
+          <span class="dz-title">詳細情報CSVをドラッグ&amp;ドロップ、またはクリックして選択</span>
+          <span class="dz-note">既存のデータに上書きで反映します(BS・PL・SSは消えません)</span>
+        </label>
+        <p id="detail-upload-status" class="file-status" hidden></p>
+      </div>
+    </section>
+
+    <!-- ===== 算定ロジック ===== -->
     <section id="panel-logic" class="panel" role="tabpanel" aria-labelledby="tab-logic" tabindex="0" hidden>
       <div class="card chart-card">
-        <h3>どの表からCF計算書を作っているか</h3>
-        <div class="legend">
-          <span class="legend-item"><span class="swatch chip-dot-bs"></span>BS(貸借対照表)</span>
-          <span class="legend-item"><span class="swatch chip-dot-pl"></span>PL(損益計算書)</span>
-          <span class="legend-item"><span class="swatch chip-dot-ss"></span>SS(株主資本等変動計算書)</span>
-          <span class="legend-item"><span class="swatch chip-dot-sup"></span>補足情報(3表の外)</span>
+        <div class="chart-head">
+          <h3>この行はどこから算定しているか</h3>
+          <label class="field">CF計算書の行
+            <select id="deriv-line-select"></select>
+          </label>
         </div>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch chip-dot-bs"></span>BS</span>
+          <span class="legend-item"><span class="swatch chip-dot-pl"></span>PL</span>
+          <span class="legend-item"><span class="swatch chip-dot-ss"></span>SS</span>
+          <span class="legend-item"><span class="swatch chip-dot-sup"></span>補足</span>
+          <span class="legend-item"><span class="swatch chip-dot-detail"></span>詳細情報</span>
+          <span class="legend-hint">左の +/− が、足すか引くかを表します</span>
+        </div>
+        <div class="chart-wrap">
+          <svg id="deriv-diagram" role="img" aria-label="選択したキャッシュ・フロー計算書の行が、どの科目からどの符号で算定され、どの区分に反映されるかを示す図"></svg>
+        </div>
+        <p id="deriv-detail-note" class="hint" hidden>※ この会社・四半期は詳細情報が入力されているため、簡便法ではなく詳細情報を使った算定式を表示しています。</p>
+        <div id="deriv-line-text" class="deriv-row"></div>
+      </div>
+
+      <div class="card chart-card">
+        <h3>全体像</h3>
         <div class="chart-wrap">
           <svg id="flow-diagram" role="img" aria-label="BS・PL・SS・補足情報が営業CF・投資CF・財務CFに流れ込み、現金及び現金同等物の期末残高に至る概念図"></svg>
         </div>
       </div>
-      <div id="derivation-body"></div>
+
+      <div class="card">
+        <h3>簡便法としての仮定</h3>
+        <p class="table-hint">BS・PL・SSだけではCF計算書は作れません。足りない情報を次の仮定で埋めています。「→」は詳細入力タブで解消できるものです。</p>
+        <div id="assumption-body"></div>
+      </div>
     </section>
   </div>
 
   <section id="empty-state" class="empty-state">
     <p>CSVファイルをアップロードすると、財務指標とキャッシュ・フロー計算書がここに表示されます。</p>
-    <p class="empty-sub">まずは「サンプル(270ファイル / 27社×10四半期)」で動作を確認できます。「算定ロジック」タブは、データがなくても内容を確認できます。</p>
+    <p class="empty-sub">まずは「サンプル(270ファイル / 27社×10四半期)」で動作を確認できます。</p>
   </section>
 </main>
 

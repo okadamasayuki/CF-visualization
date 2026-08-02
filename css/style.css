@@ -23,6 +23,7 @@
   --src-pl: #eb6834;
   --src-ss: #1baf7a;
   --src-sup: #898781;
+  --src-detail: #4a3aa7;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -48,6 +49,7 @@
     --src-pl: #d95926;
     --src-ss: #199e70;
     --src-sup: #898781;
+    --src-detail: #9085e9;
   }
 }
 
@@ -360,6 +362,92 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .level-high .assumption-badge { color: var(--warn); }
 .assumption-title { font-weight: 600; font-size: 13px; }
 .assumption-body { font-size: 12px; color: var(--text-secondary); margin: 6px 0 0; }
+
+.chip-dot-detail, .deriv-chip.chip-detail .chip-dot { background: var(--src-detail); }
+#flow-diagram .flow-box.src-detail, #deriv-diagram .flow-box.src-detail { stroke: var(--src-detail); stroke-width: 2; }
+#flow-diagram .edge-detail, #deriv-diagram .edge-detail { stroke: var(--src-detail); }
+
+/* ---- 算定ロジックの対話的な図 ---- */
+#deriv-diagram { width: 100%; min-width: 700px; display: block; }
+#deriv-diagram .flow-box { fill: var(--page); stroke: var(--grid); stroke-width: 1; }
+#deriv-diagram .flow-box.src-bs { stroke: var(--src-bs); stroke-width: 2; }
+#deriv-diagram .flow-box.src-pl { stroke: var(--src-pl); stroke-width: 2; }
+#deriv-diagram .flow-box.src-ss { stroke: var(--src-ss); stroke-width: 2; }
+#deriv-diagram .flow-box.src-sup { stroke: var(--src-sup); stroke-width: 2; }
+#deriv-diagram .flow-box.sec { fill: var(--surface-1); stroke: var(--baseline); stroke-width: 2; }
+#deriv-diagram .flow-box.result { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 2; }
+#deriv-diagram .flow-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+#deriv-diagram .flow-sub { fill: var(--text-muted); font-size: 11px; }
+#deriv-diagram .flow-value {
+  fill: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+#deriv-diagram .flow-head { fill: var(--text-muted); font-size: 11px; font-weight: 600; }
+#deriv-diagram .flow-edge { fill: none; stroke-width: 1.5; opacity: 0.6; }
+#deriv-diagram .edge-bs { stroke: var(--src-bs); }
+#deriv-diagram .edge-pl { stroke: var(--src-pl); }
+#deriv-diagram .edge-ss { stroke: var(--src-ss); }
+#deriv-diagram .edge-sup { stroke: var(--src-sup); }
+#deriv-diagram .edge-calc { stroke: var(--baseline); }
+/* 足すか引くかのバッジ。記号そのものが意味を持つので色は補助 */
+#deriv-diagram .sign-badge circle { fill: var(--surface-1); stroke-width: 1.5; }
+#deriv-diagram .sign-badge text { font-size: 14px; font-weight: 700; }
+#deriv-diagram .sign-badge.is-plus circle { stroke: var(--pos); }
+#deriv-diagram .sign-badge.is-plus text { fill: var(--pos); }
+#deriv-diagram .sign-badge.is-minus circle { stroke: var(--neg); }
+#deriv-diagram .sign-badge.is-minus text { fill: var(--neg); }
+
+.assumption-fix {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--accent-wash);
+}
+.assumption-fix .icon { color: var(--accent); font-weight: 700; }
+
+/* ---- 詳細入力 ---- */
+.detail-status { margin-bottom: 14px; display: grid; gap: 8px; }
+.detail-applied { font-size: 13px; color: var(--good); }
+.detail-none { font-size: 13px; color: var(--text-muted); }
+
+.detail-form { display: grid; gap: 2px; }
+.detail-group { margin: 16px 0 8px; }
+.detail-group:first-child { margin-top: 0; }
+.detail-group h4 { font-size: 13px; margin: 0 0 4px; }
+.detail-lead { font-size: 12px; color: var(--text-secondary); margin: 0; }
+.detail-effect { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }
+.detail-row {
+  display: grid;
+  grid-template-columns: 1fr 150px 64px;
+  gap: 12px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+.detail-row.is-set { background: var(--accent-wash); }
+.detail-label { font-size: 13px; color: var(--text-secondary); }
+.detail-row input {
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding: 5px 8px;
+  border: 1px solid var(--grid);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+.detail-row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.detail-row input:disabled { opacity: 0.5; }
+.detail-state { font-size: 11px; color: var(--accent); }
+
+.dropzone-compact { padding: 20px 16px; }
 
 /* ---- 系列の色(預け金 / 借入金) ---- */
 .series-s1 { --series: var(--pos); }
