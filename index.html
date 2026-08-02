@@ -29,7 +29,7 @@
     </label>
 
     <div class="toolbar">
-      <button id="btn-sample-27" type="button" class="btn btn-secondary">サンプル(27社×10四半期)</button>
+      <button id="btn-sample-27" type="button" class="btn btn-secondary">サンプル(270ファイル / 27社×10四半期)</button>
       <button id="btn-sample" type="button" class="btn">サンプル(1社)</button>
       <button id="btn-template" type="button" class="btn">テンプレートCSVをダウンロード</button>
       <button id="btn-export" type="button" class="btn" hidden>読み込んだ内容をCSVで保存</button>
@@ -83,6 +83,8 @@
               aria-controls="panel-overview" aria-selected="false" tabindex="-1">全社比較</button>
       <button type="button" class="tab" role="tab" id="tab-data" data-tab="data"
               aria-controls="panel-data" aria-selected="false" tabindex="-1">データ</button>
+      <button type="button" class="tab" role="tab" id="tab-logic" data-tab="logic"
+              aria-controls="panel-logic" aria-selected="false" tabindex="-1">算定ロジック</button>
     </div>
 
     <!-- ===== サマリー ===== -->
@@ -220,11 +222,28 @@
         </div>
       </div>
     </section>
+
+    <!-- ===== 算定ロジック ===== -->
+    <section id="panel-logic" class="panel" role="tabpanel" aria-labelledby="tab-logic" tabindex="0" hidden>
+      <div class="card chart-card">
+        <h3>どの表からCF計算書を作っているか</h3>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch chip-dot-bs"></span>BS(貸借対照表)</span>
+          <span class="legend-item"><span class="swatch chip-dot-pl"></span>PL(損益計算書)</span>
+          <span class="legend-item"><span class="swatch chip-dot-ss"></span>SS(株主資本等変動計算書)</span>
+          <span class="legend-item"><span class="swatch chip-dot-sup"></span>補足情報(3表の外)</span>
+        </div>
+        <div class="chart-wrap">
+          <svg id="flow-diagram" role="img" aria-label="BS・PL・SS・補足情報が営業CF・投資CF・財務CFに流れ込み、現金及び現金同等物の期末残高に至る概念図"></svg>
+        </div>
+      </div>
+      <div id="derivation-body"></div>
+    </section>
   </div>
 
   <section id="empty-state" class="empty-state">
     <p>CSVファイルをアップロードすると、財務指標とキャッシュ・フロー計算書がここに表示されます。</p>
-    <p class="empty-sub">まずは「サンプル(27社×10四半期)」で動作を確認できます。</p>
+    <p class="empty-sub">まずは「サンプル(270ファイル / 27社×10四半期)」で動作を確認できます。「算定ロジック」タブは、データがなくても内容を確認できます。</p>
   </section>
 </main>
 
@@ -235,6 +254,7 @@
 <script src="js/schema.js"></script>
 <script src="js/csv.js"></script>
 <script src="js/metrics.js"></script>
+<script src="js/derivation.js"></script>
 <script src="js/samples.js"></script>
 <script src="js/app.js"></script>
 </body>

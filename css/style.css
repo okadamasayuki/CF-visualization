@@ -18,6 +18,11 @@
   --accent: #2a78d6;
   --accent-wash: rgba(42, 120, 214, 0.07);
   --series-2: #eb6834;   /* 2系列目(借入金) */
+  /* 算定ロジックの出所4分類(補足は中立グレー) */
+  --src-bs: #2a78d6;
+  --src-pl: #eb6834;
+  --src-ss: #1baf7a;
+  --src-sup: #898781;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -39,6 +44,10 @@
     --accent: #3987e5;
     --accent-wash: rgba(57, 135, 229, 0.12);
     --series-2: #d95926;
+    --src-bs: #3987e5;
+    --src-pl: #d95926;
+    --src-ss: #199e70;
+    --src-sup: #898781;
   }
 }
 
@@ -265,6 +274,92 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   margin-top: 10px;
 }
 .sheet-foot .table-hint { margin: 0; }
+
+/* ---- 算定ロジック ---- */
+/* 出所の4分類。色は点にだけ使い、文字は必ずテキスト色にする */
+.chip-dot-bs, .deriv-chip.chip-bs .chip-dot { background: var(--src-bs); }
+.chip-dot-pl, .deriv-chip.chip-pl .chip-dot { background: var(--src-pl); }
+.chip-dot-ss, .deriv-chip.chip-ss .chip-dot { background: var(--src-ss); }
+.chip-dot-sup, .deriv-chip.chip-sup .chip-dot { background: var(--src-sup); }
+.deriv-chip.chip-calc .chip-dot { background: var(--baseline); }
+
+#flow-diagram { width: 100%; min-width: 640px; display: block; }
+#flow-diagram .flow-box { fill: var(--page); stroke: var(--grid); stroke-width: 1; }
+#flow-diagram .flow-box.src-bs { stroke: var(--src-bs); stroke-width: 2; }
+#flow-diagram .flow-box.src-pl { stroke: var(--src-pl); stroke-width: 2; }
+#flow-diagram .flow-box.src-ss { stroke: var(--src-ss); stroke-width: 2; }
+#flow-diagram .flow-box.src-sup { stroke: var(--src-sup); stroke-width: 2; }
+#flow-diagram .flow-box.sec { fill: var(--surface-1); stroke: var(--baseline); stroke-width: 2; }
+#flow-diagram .flow-box.result { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 2; }
+#flow-diagram .flow-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+#flow-diagram .flow-sub { fill: var(--text-muted); font-size: 11px; }
+#flow-diagram .flow-edge { fill: none; stroke-width: 1.5; opacity: 0.55; }
+#flow-diagram .edge-bs { stroke: var(--src-bs); }
+#flow-diagram .edge-pl { stroke: var(--src-pl); }
+#flow-diagram .edge-ss { stroke: var(--src-ss); }
+#flow-diagram .edge-sup { stroke: var(--src-sup); }
+#flow-diagram .edge-calc { stroke: var(--baseline); }
+
+.deriv-card { margin-bottom: 16px; }
+.deriv-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--grid);
+}
+.deriv-row:first-of-type { border-top: none; }
+.deriv-row.is-subtotal { background: var(--page); border-radius: 8px; padding: 10px 12px; }
+.deriv-name { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.deriv-formula { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.deriv-op { color: var(--text-muted); font-size: 13px; }
+.deriv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 9px;
+  border: 1px solid var(--grid);
+  border-radius: 999px;
+  background: var(--surface-1);
+}
+.deriv-chip .chip-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.deriv-chip .chip-kind { color: var(--text-muted); font-size: 11px; font-weight: 600; }
+.deriv-chip .chip-text { color: var(--text-primary); }
+.deriv-note { font-size: 12px; color: var(--text-secondary); margin: 6px 0 0; }
+.deriv-assumption {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 6px 0 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--grid);
+  border-left: 3px solid var(--warn);
+}
+.deriv-assumption .icon { color: var(--warn); font-weight: 700; }
+
+.assumption {
+  border: 1px solid var(--grid);
+  border-left: 3px solid var(--baseline);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 10px;
+}
+.assumption.level-critical { border-left-color: var(--bad); }
+.assumption.level-high { border-left-color: var(--warn); }
+.assumption-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.assumption-badge {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+  color: var(--text-muted);
+}
+.level-critical .assumption-badge { color: var(--bad); }
+.level-high .assumption-badge { color: var(--warn); }
+.assumption-title { font-weight: 600; font-size: 13px; }
+.assumption-body { font-size: 12px; color: var(--text-secondary); margin: 6px 0 0; }
 
 /* ---- 系列の色(預け金 / 借入金) ---- */
 .series-s1 { --series: var(--pos); }
