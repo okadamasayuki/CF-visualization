@@ -9,6 +9,10 @@ const OBSOLETE_STORAGE_KEYS = [
   "cf-visualization-csv-v3",
 ];
 const TREND_QUARTERS = 10; // 推移グラフに表示する四半期数
+// 算定ロジックの図。狭い画面では縮めず枠の中で横スクロールさせ、
+// 広い画面では間延びしないよう上限で止めて中央に置く
+const DIAGRAM_MIN_W = 560;
+const DIAGRAM_MAX_W = 1040;
 /**
  * 利息及び配当金の表示区分。日本基準では継続適用を条件に2方式の選択が認められている。
  *  operating          … 受取利息・受取配当金・支払利息を営業、支払配当金を財務
@@ -362,6 +366,44 @@ function svgEl(tag, attrs = {}) {
   const node = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
   return node;
+}
+
+/** SVGテキストのおおよその幅(全角は1em、半角は約0.55em として見積もる) */
+function textWidth(text, fontSize) {
+  let em = 0;
+  for (const ch of String(text)) em += /[\x20-\x7E｡-ﾟ]/.test(ch) ? 0.55 : 1;
+  return em * fontSize;
+}
+
+/**
+ * 指定幅に収まらない文字列を切り詰める。
+ * 末尾が「(期末)」のような括弧書きなら、そこは残して手前を詰める。
+ */
+function fitLabel(text, fontSize, maxWidth) {
+  const s = String(text);
+  if (maxWidth <= 0 || textWidth(s, fontSize) <= maxWidth) return s;
+  const m = s.match(/^(.+?)([(（][^()（）]{1,6}[)）])$/);
+  if (m) {
+    const tail = m[2];
+    const head = ellipsize(m[1], fontSize, maxWidth - textWidth(tail, fontSize));
+    if (head.length > 1) return head + tail;
+  }
+  return ellipsize(s, fontSize, maxWidth);
+}
+
+/** 指定幅に収まらない文字列を末尾「…」で切り詰める */
+function ellipsize(text, fontSize, maxWidth) {
+  const s = String(text);
+  if (maxWidth <= 0 || textWidth(s, fontSize) <= maxWidth) return s;
+  const room = maxWidth - textWidth("…", fontSize);
+  let out = "", w = 0;
+  for (const ch of s) {
+    const cw = textWidth(ch, fontSize);
+    if (w + cw > room) break;
+    out += ch;
+    w += cw;
+  }
+  return out + "…";
 }
 
 function niceTicks(min, max, count = 5) {
@@ -1177,31 +1219,56 @@ function renderDerivationDiagram() {
     !(item.detailVariant && inputs === item.detailVariant.inputs);
 
   const rows = item.computed ? [] : inputs;
-  const W = 720;
   const ROW = 44, TOP = 56;
-  const H = Math.max(TOP + Math.max(rows.length, 1) * ROW + 24, 220);
+  const H = TOP + Math.max(rows.length, 1) * ROW + 24;
+
+  // 図はコンテナ幅にそのまま合わせて等倍で描く(viewBoxで拡大縮小しない)。
+  // 狭いときだけ DIAGRAM_MIN_W まで詰め、それ以下は .chart-wrap が横スクロールする。
+  const avail = svg.parentElement.clientWidth || DIAGRAM_MIN_W;
+  const W = Math.min(Math.max(Math.round(avail), DIAGRAM_MIN_W), DIAGRAM_MAX_W);
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
   svg.setAttribute("height", H);
 
-  const SX = 6, SW = 250;
-  const CX = 320, CW = 190;
-  const RX = 552, RW = 162;
+  // 3列(算定に使う項目 / CF計算書の行 / 反映先)を幅に応じて配分する
+  const PAD = 12, BADGE = 26;
+  const GAP = Math.max(28, Math.round(W * 0.05));
+  const inner = W - PAD * 2 - GAP * 2;
+  const SW = Math.round(inner * 0.40);
+  const CW = Math.round(inner * 0.33);
+  const RW = inner - SW - CW;
+  const SX = PAD;
+  const CX = SX + SW + GAP;
+  const RX = CX + CW + GAP;
   const midY = TOP + (Math.max(rows.length, 1) * ROW) / 2 - ROW / 2;
 
   const box = (x, y, w, h, cls, label, sub, value) => {
     const g = svgEl("g", {});
     g.append(svgEl("rect", { class: `flow-box ${cls}`, x, y, width: w, height: h, rx: 9 }));
-    const t = svgEl("text", { class: "flow-label", x: x + 12, y: y + (sub || value !== undefined ? 20 : h / 2 + 4) });
-    t.textContent = label;
+    // 金額は2行目の右端に置くので、同じ行に来る補足だけ手前で切り上げる
+    const valText = value !== undefined && value !== null ? fmt(value) : "";
+    const reserve = valText ? textWidth(valText, 12) + 16 : 0;
+    const twoLine = Boolean(sub) || Boolean(valText);
+    // 枠の高さに合わせて2行を収める(下端に文字がぶつからないようにする)
+    const line1 = y + (twoLine ? (h - 30) / 2 + 12 : h / 2 + 4);
+    const line2 = y + (h - 30) / 2 + 26;
+    const t = svgEl("text", { class: "flow-label", x: x + 12, y: line1 });
+    t.textContent = fitLabel(label, 12, w - 24);
+    // 枠に入りきらず省略したときは、ホバーで全文を読めるようにする
+    if (t.textContent !== label) {
+      const full = svgEl("title", {});
+      full.textContent = label;
+      g.append(full);
+    }
     g.append(t);
     if (sub) {
-      const e = svgEl("text", { class: "flow-sub", x: x + 12, y: y + 35 });
-      e.textContent = sub;
+      const e = svgEl("text", { class: "flow-sub", x: x + 12, y: line2 });
+      e.textContent = fitLabel(sub, 11, w - 24 - reserve);
       g.append(e);
     }
-    if (value !== undefined && value !== null) {
-      const v = svgEl("text", { class: "flow-value", x: x + w - 12, y: y + 35, "text-anchor": "end" });
-      v.textContent = fmt(value);
+    if (valText) {
+      const v = svgEl("text", { class: "flow-value", x: x + w - 12, y: line2, "text-anchor": "end" });
+      v.textContent = valText;
       g.append(v);
     }
     svg.append(g);
@@ -1258,6 +1325,9 @@ function renderDerivationDiagram() {
     t.textContent = label;
     svg.append(t);
   }
+
+  // 画面が狭くて図が枠に収まらないときだけ、横スクロールできることを伝える
+  document.getElementById("deriv-scroll-hint").hidden = W <= svg.parentElement.clientWidth;
 }
 
 function renderDerivationPicker() {
@@ -2115,6 +2185,15 @@ document.addEventListener("DOMContentLoaded", () => {
     state.derivLine = Number(ev.target.value);
     renderDerivationDiagram();
     renderDerivationText();
+  });
+  // 図はコンテナ幅に合わせて等倍で描くので、幅が変わったら描き直す
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeTimer = null;
+      if (!document.getElementById("panel-logic").hidden) renderDerivationDiagram();
+    }, 120);
   });
 
   // --- 詳細入力タブ ---

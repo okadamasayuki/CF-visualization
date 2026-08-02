@@ -368,7 +368,8 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 #flow-diagram .edge-detail, #deriv-diagram .edge-detail { stroke: var(--src-detail); }
 
 /* ---- 算定ロジックの対話的な図 ---- */
-#deriv-diagram { width: 100%; min-width: 700px; display: block; }
+/* 幅・高さはJS側がコンテナ幅から等倍で決めるので、CSSでは伸縮させない */
+#deriv-diagram { display: block; margin-inline: auto; }
 #deriv-diagram .flow-box { fill: var(--page); stroke: var(--grid); stroke-width: 1; }
 #deriv-diagram .flow-box.src-bs { stroke: var(--src-bs); stroke-width: 2; }
 #deriv-diagram .flow-box.src-pl { stroke: var(--src-pl); stroke-width: 2; }
