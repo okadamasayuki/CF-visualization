@@ -70,6 +70,8 @@ function lookupItem(name) {
 /* ---------- 見出し行の別名 ---------- */
 
 const HEADER_ALIASES = {
+  company: ["会社名", "会社", "企業名", "企業", "法人名", "社名", "銘柄", "銘柄名", "対象会社",
+    "company", "companyname", "corporation", "entity", "firm", "ticker"],
   section: ["区分", "分類", "財務諸表", "表", "種別", "section", "category", "type", "sheet"],
   item: ["科目", "項目", "勘定科目", "名称", "内容", "変動事由", "item", "account", "name", "label"],
   prev: ["前期末", "前期", "前期末残高", "前期首", "期首", "期首残高", "前年度", "前事業年度", "前連結会計年度",
@@ -171,7 +173,7 @@ function isAmountLike(raw) {
  */
 function findHeader(rows) {
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
-    const cols = { section: null, item: null, prev: null, curr: null };
+    const cols = { company: null, section: null, item: null, prev: null, curr: null };
     let amountCols = 0;
     rows[r].forEach((cell, c) => {
       const role = HEADER_INDEX.get(normalizeKey(cell));
@@ -203,6 +205,7 @@ function inferLayout(rows) {
   return {
     headerRow: -1,
     cols: {
+      company: null,
       section: null,
       item: itemCol,
       prev: amountCols.length >= 2 ? amountCols[0] : null,
@@ -214,24 +217,23 @@ function inferLayout(rows) {
 /* ---------- メイン: CSVテキスト → 入力データ ---------- */
 
 /**
- * @returns {{data, ok, errors[], warnings[], matched, unmatched[]}}
+ * @param {string} text CSV本文
+ * @param {string} defaultCompany 会社名の列がない場合に使う名前(通常はファイル名)
+ * @returns {{companies: {name, data}[], ok, errors[], warnings[], matched, recognized, unmatched[]}}
  */
-function parseFinancialCSV(text) {
+function parseFinancialCSV(text, defaultCompany = "対象会社") {
   const errors = [];
   const warnings = [];
-  const data = emptyData();
+  const fail = (msg) => ({
+    companies: [], ok: false, errors: [msg], warnings, matched: 0, recognized: 0, unmatched: [],
+  });
 
   const rows = parseDelimited(text, detectDelimiter(text));
-  if (rows.length === 0) {
-    return { data, ok: false, errors: ["ファイルが空です。"], warnings, matched: 0, unmatched: [] };
-  }
+  if (rows.length === 0) return fail("ファイルが空です。");
 
   const layout = findHeader(rows) || inferLayout(rows);
   if (!layout) {
-    return {
-      data, ok: false, matched: 0, unmatched: [], warnings,
-      errors: ["科目名の列を判別できませんでした。1行目に「区分,科目,前期末,当期末」の見出しを入れてください(テンプレートCSVをご利用ください)。"],
-    };
+    return fail("科目名の列を判別できませんでした。1行目に「会社名,区分,科目,前期末,当期末」の見出しを入れてください(テンプレートCSVをご利用ください)。");
   }
   const { cols } = layout;
   if (cols.curr === null && cols.prev !== null) { cols.curr = cols.prev; cols.prev = null; }
@@ -245,11 +247,27 @@ function parseFinancialCSV(text) {
   let matched = 0;    // 金額まで取り込めた科目の行数
   let recognized = 0; // 科目名を認識できた行数(金額が空の行も含む)
 
+  // 会社名 → データ。会社名の列がなければ全行を1社として扱う
+  const companies = new Map();
+  let lastCompany = "";
+  const dataFor = (name) => {
+    if (!companies.has(name)) companies.set(name, emptyData());
+    return companies.get(name);
+  };
+
   for (let r = layout.headerRow + 1; r < rows.length; r++) {
     const row = rows[r];
     const lineNo = r + 1;
     const rawName = (row[cols.item] || "").trim();
     if (rawName === "") continue;
+
+    // 会社名が空のセルは直前の行から引き継ぐ(先頭行にだけ社名がある表に対応)
+    if (cols.company !== null) {
+      const c = (row[cols.company] || "").trim();
+      if (c !== "") lastCompany = c;
+    }
+    const companyName = cols.company !== null ? (lastCompany || defaultCompany) : defaultCompany;
+    const data = dataFor(companyName);
 
     const target = lookupItem(rawName);
     if (!target) {
@@ -273,7 +291,7 @@ function parseFinancialCSV(text) {
         v = Math.abs(v);
       }
       const bucket = target.section === "bs" ? data.bs[period] : data[target.section];
-      const slot = `${target.section}:${target.key}:${period}`;
+      const slot = `${companyName} ${target.section}:${target.key}:${period}`;
       bucket[target.key] = (seen.has(slot) ? bucket[target.key] : 0) + v;
       seen.set(slot, true);
       return true;
@@ -306,24 +324,39 @@ function parseFinancialCSV(text) {
     );
   }
 
-  return { data, ok: errors.length === 0, errors, warnings, matched, recognized, unmatched };
+  return {
+    companies: [...companies].map(([name, data]) => ({ name, data })),
+    ok: errors.length === 0, errors, warnings, matched, recognized, unmatched,
+  };
 }
 
 /* ---------- テンプレートCSVの生成 ---------- */
 
-function buildTemplateCSV(values = null) {
-  const lines = ["区分,科目,前期末,当期末"];
+/**
+ * @param {{name, data}[]|null} companies 省略すると空欄のひな形(2社分)を出力する
+ */
+function buildTemplateCSV(companies = null) {
+  const lines = ["会社名,区分,科目,前期末,当期末"];
   const cell = (v) => (v === null || v === undefined ? "" : String(v));
+  // カンマや引用符を含む会社名をCSVとして正しく書き出す
+  const q = (s) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
 
-  for (const f of DISPLAY_FIELDS.bs) {
-    const prev = values ? cell(values.bs.prev[f.key]) : "";
-    const curr = values ? cell(values.bs.curr[f.key]) : "";
-    lines.push(`BS,${f.label},${prev},${curr}`);
-  }
-  for (const section of ["pl", "sup", "ss"]) {
-    for (const f of DISPLAY_FIELDS[section]) {
-      const curr = values ? cell(values[section][f.key]) : "";
-      lines.push(`${SECTION_LABELS[section]},${f.label},,${curr}`);
+  const targets = companies && companies.length
+    ? companies
+    : [{ name: "A社", data: null }, { name: "B社", data: null }];
+
+  for (const { name, data } of targets) {
+    const n = q(name);
+    for (const f of DISPLAY_FIELDS.bs) {
+      const prev = data ? cell(data.bs.prev[f.key]) : "";
+      const curr = data ? cell(data.bs.curr[f.key]) : "";
+      lines.push(`${n},BS,${f.label},${prev},${curr}`);
+    }
+    for (const section of ["pl", "sup", "ss"]) {
+      for (const f of DISPLAY_FIELDS[section]) {
+        const curr = data ? cell(data[section][f.key]) : "";
+        lines.push(`${n},${SECTION_LABELS[section]},${f.label},,${curr}`);
+      }
     }
   }
   return lines.join("\r\n") + "\r\n";

@@ -127,6 +127,78 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
 .format-help code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
 .section-title { font-size: 15px; margin: 24px 0 10px; }
+.count-badge {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border: 1px solid var(--grid);
+  border-radius: 999px;
+  padding: 1px 9px;
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+
+/* ---- 全社比較 ---- */
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.measure-picker, .company-bar label {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  padding: 5px 8px;
+  max-width: 260px;
+}
+select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.company-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 20px 0 0;
+  padding: 10px 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.legend-hint { color: var(--text-muted); margin-left: auto; }
+.table-hint { color: var(--text-muted); font-size: 12px; margin: 0 0 10px; }
+.table-scroll { overflow-x: auto; }
+
+.overview-table { min-width: 720px; }
+.overview-table th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.overview-table th:hover { color: var(--text-primary); }
+.overview-table th:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.overview-table .sort-arrow { color: var(--accent); }
+.overview-table td.num { width: auto; min-width: 78px; }
+.overview-table th.check-col, .overview-table td.check-col { width: 48px; min-width: 48px; text-align: center; }
+.overview-table td.check-col.ok { color: var(--good); font-weight: 700; }
+.overview-table td.check-col.ng { color: var(--bad); font-weight: 700; }
+.overview-table tbody tr { cursor: pointer; }
+.overview-table tbody tr:hover { background: var(--accent-wash); }
+.overview-table tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.overview-table tbody tr.is-selected { background: var(--accent-wash); }
+.overview-table tbody tr.is-selected td.label { font-weight: 600; color: var(--text-primary); }
+.overview-table tfoot td { border-top: 2px solid var(--baseline); }
 
 /* ---- ツールバー ---- */
 .toolbar {
@@ -239,17 +311,23 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
 .chart-wrap { position: relative; width: 100%; overflow-x: auto; }
 /* 画面が狭いときは縮小せず横スクロールさせる(ラベルが読めなくなるため) */
 #waterfall { width: 100%; min-width: 600px; height: auto; display: block; }
+#overview-chart { width: 100%; min-width: 640px; display: block; }
 
-#waterfall .grid-line { stroke: var(--grid); stroke-width: 1; }
-#waterfall .baseline { stroke: var(--baseline); stroke-width: 1; }
-#waterfall .connector { stroke: var(--baseline); stroke-width: 1; }
-#waterfall .bar-pos { fill: var(--pos); }
-#waterfall .bar-neg { fill: var(--neg); }
-#waterfall .bar-total { fill: var(--total); }
-#waterfall .tick-label, #waterfall .cat-label { fill: var(--text-muted); font-size: 11px; }
-#waterfall .value-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
-#waterfall .hit { fill: transparent; cursor: default; }
-#waterfall .hit:hover + g .bar, #waterfall g.band:hover .bar { opacity: 0.85; }
+.chart-wrap svg .grid-line { stroke: var(--grid); stroke-width: 1; }
+.chart-wrap svg .baseline { stroke: var(--baseline); stroke-width: 1; }
+.chart-wrap svg .connector { stroke: var(--baseline); stroke-width: 1; }
+.chart-wrap svg .bar-pos { fill: var(--pos); }
+.chart-wrap svg .bar-neg { fill: var(--neg); }
+.chart-wrap svg .bar-total { fill: var(--total); }
+.chart-wrap svg .tick-label, .chart-wrap svg .cat-label { fill: var(--text-muted); font-size: 11px; }
+.chart-wrap svg .value-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+.chart-wrap svg .hit { fill: transparent; }
+.chart-wrap svg g.band:hover .bar { opacity: 0.85; }
+
+#overview-chart .hit { cursor: pointer; }
+#overview-chart .hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+#overview-chart g.band:hover .row-name { fill: var(--text-primary); }
+#overview-chart .row-name.is-selected { fill: var(--text-primary); font-weight: 700; }
 
 .tooltip {
   position: absolute;
@@ -265,6 +343,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
 }
 .tooltip .tt-title { font-weight: 600; margin-bottom: 2px; }
 .tooltip .tt-value { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.tooltip .tt-hint { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
 
 /* ---- CF計算書 ---- */
 .statement-meta { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
