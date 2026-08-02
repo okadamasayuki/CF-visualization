@@ -549,6 +549,28 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .btn-secondary { background: var(--accent); color: #fff; border-color: transparent; }
 .btn-secondary:hover { opacity: 0.9; }
 .btn-ghost { background: transparent; }
+/* 文中に置く小さな操作(共有フォルダの「読み込む」など) */
+.btn-link {
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0 2px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.btn-link:hover { opacity: 0.8; }
+
+/* ---- 共有フォルダ ---- */
+.share-path {
+  margin: 12px 0 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+#share-card .toolbar { margin-top: 0; }
+#share-card .field.checkbox { margin-top: 10px; }
 .unit-note { color: var(--text-muted); font-size: 12px; }
 
 /* ---- 読み込み結果のカード ---- */

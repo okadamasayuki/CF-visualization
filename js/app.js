@@ -37,7 +37,9 @@ const state = {
   sort: { key: null, dir: 1 },
   trendMode: "balance", // balance | delta
   sources: [],
-  tab: "summary",
+  tab: "source",
+  // 共有フォルダ連携の状態(dir はディレクトリハンドル)
+  share: { dir: null, auto: true, stamps: new Map(), busy: false, timer: null, suppress: false, scheme: null, saved: false },
   previews: new Map(),  // ファイル名 → CSVプレビュー(必要になったとき作る)
   dataFile: 0,
   dataAuto: true,     // 会社・四半期に対応するファイルを自動で開くか
@@ -1742,14 +1744,17 @@ async function handleDetailFiles(fileList) {
  * タブ
  * ======================================================= */
 
+const hasData = () => state.datasets.length > 0;
+
 const TABS = [
-  { id: "summary" },
-  { id: "trend", needs: () => state.periods.length > 1 },
-  { id: "cf" },
-  { id: "overview", needs: () => state.companies.length > 1 },
-  { id: "data" },
-  { id: "detail" },
-  { id: "logic" },
+  { id: "source" },
+  { id: "summary", needs: hasData },
+  { id: "trend", needs: () => hasData() && state.periods.length > 1 },
+  { id: "cf", needs: hasData },
+  { id: "overview", needs: () => hasData() && state.companies.length > 1 },
+  { id: "data", needs: hasData },
+  { id: "detail", needs: hasData },
+  { id: "logic", needs: hasData },
 ];
 
 function visibleTabs() {
@@ -1757,7 +1762,7 @@ function visibleTabs() {
 }
 
 function selectTab(id) {
-  if (!visibleTabs().some((t) => t.id === id)) id = "summary";
+  if (!visibleTabs().some((t) => t.id === id)) id = hasData() ? "summary" : "source";
   state.tab = id;
   for (const t of TABS) {
     const btn = document.getElementById(`tab-${t.id}`);
@@ -1767,6 +1772,8 @@ function selectTab(id) {
     btn.tabIndex = active ? 0 : -1;
     panel.hidden = !active;
   }
+  document.getElementById("selector-bar").hidden = !hasData() || id === "source" ||
+    (state.companies.length <= 1 && state.periods.length <= 1);
   // 表示された瞬間に最新の内容を描く(重い「データ」タブは開くまで作らない)
   if (id === "data") renderData();
   if (id === "trend") renderTrend();
@@ -1780,7 +1787,7 @@ function renderTabs() {
   for (const t of TABS) {
     document.getElementById(`tab-${t.id}`).hidden = !shown.includes(t.id);
   }
-  selectTab(shown.includes(state.tab) ? state.tab : "summary");
+  selectTab(shown.includes(state.tab) ? state.tab : (hasData() ? "summary" : "source"));
 }
 
 /* =========================================================
@@ -1824,11 +1831,9 @@ function renderAll() {
   const dataset = currentDataset();
   const multi = state.companies.length > 1;
 
-  document.getElementById("workspace").hidden = !dataset;
-  document.getElementById("empty-state").hidden = !!dataset;
   document.getElementById("btn-clear").hidden = false;
   document.getElementById("btn-export").hidden = !dataset;
-  if (!dataset) { renderChecks([]); return; }
+  if (!dataset) { renderChecks([]); renderTabs(); return; }
 
   renderMetrics();
   renderChecks(dataset.checks);
@@ -1865,10 +1870,9 @@ function renderAll() {
 
 function showEmptyState() {
   document.getElementById("selector-bar").hidden = true;
-  document.getElementById("workspace").hidden = true;
-  document.getElementById("empty-state").hidden = false;
   document.getElementById("btn-clear").hidden = true;
   document.getElementById("btn-export").hidden = true;
+  renderTabs();
 }
 
 /* =========================================================
@@ -1882,7 +1886,16 @@ function saveState() {
       sources: state.sources, overrides: state.overrides,
       interestPolicy: state.interestPolicy,
     }));
-  } catch (_) { /* 容量超過などで保存できなくても動作に影響はない */ }
+    document.getElementById("storage-warning").hidden = true;
+  } catch (err) {
+    // 黙って落とすと「保存されたつもり」になるので、はっきり伝える
+    const warn = document.getElementById("storage-warning");
+    warn.hidden = false;
+    warn.querySelector(".text").textContent = state.share.dir
+      ? "この端末のブラウザには保存できませんでした(容量上限)。共有フォルダには書き出しています。"
+      : "この端末のブラウザに保存できませんでした(容量上限)。ページを閉じると読み込んだ内容は消えます。共有フォルダを指定するか、「読み込んだ内容をCSVで保存」で書き出してください。";
+  }
+  scheduleSharePush();
 }
 
 function baseName(filename) {
@@ -1937,7 +1950,8 @@ function buildState(datasets, warnings) {
     state.byKey.set(keyOf(d.company, d.period.label), d);
     periods.set(d.period.label, d.period);
   }
-  state.companies = companies;
+  // ファイル名の並びに左右されないよう、会社名の五十音順で並べる
+  state.companies = companies.sort((a, b) => a.localeCompare(b, "ja"));
   state.periods = [...periods.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 
   let derived = 0, noPrev = 0;
@@ -2056,6 +2070,8 @@ function applySources(sources) {
   renderMessages(errors, warnings);
   renderSelectors();
   renderAll();
+  // 読み込み画面に留まらず、結果まで進む
+  if (state.tab === "source") selectTab("summary");
 
   saveState();
 }
@@ -2089,6 +2105,257 @@ function clearAll() {
   messages.innerHTML = "";
   try { localStorage.removeItem(STORAGE_KEY); } catch (_) { /* 無視 */ }
   showEmptyState();
+}
+
+/* =========================================================
+ * 共有フォルダ連携(画面側の制御)
+ *
+ * 実際のファイル読み書きは js/share.js が担当する。
+ * ここでは「いつ読むか・いつ書くか」と、状態の表示だけを扱う。
+ * ======================================================= */
+
+const SHARE_AUTO_KEY = "cf-visualization-share-auto";
+
+function shareEl(id) { return document.getElementById(id); }
+
+function shareStatus(text, kind = "") {
+  const p = shareEl("share-status");
+  p.hidden = !text;
+  p.textContent = text;
+  p.className = `file-status ${kind}`;
+}
+
+function renderShare() {
+  const supported = shareSupported();
+  shareEl("share-unsupported").hidden = supported;
+  shareEl("share-controls").hidden = !supported;
+  if (!supported) {
+    shareEl("share-unsupported-text").textContent = window.isSecureContext
+      ? "このブラウザは共有フォルダの直接読み書きに対応していません(パソコンの Chrome / Edge が必要です。iPhone・iPad・Android・Safari・Firefox は非対応)。共有フォルダに置いたCSVを上のドラッグ&ドロップで読み込み、「読み込んだ内容をCSVで保存」で書き戻す使い方はできます。"
+      : "共有フォルダの直接読み書きには HTTPS でのアクセスが必要です。GitHub Pages の URL から開いてください。";
+    shareEl("share-state").textContent = "使えません";
+    return;
+  }
+
+  const connected = !!state.share.dir;
+  shareEl("share-state").textContent = connected ? "接続中" : "未接続";
+  shareEl("share-path").hidden = !connected;
+  if (connected) {
+    shareEl("share-path").textContent =
+      `フォルダ:${state.share.dir.name}(ブラウザの仕様で、完全なパスは表示できません)`;
+  }
+  shareEl("btn-share-pick").textContent = connected ? "別のフォルダを選ぶ" : "共有フォルダを選ぶ";
+  for (const [id, show] of [
+    ["btn-share-pull", connected],
+    ["btn-share-push", connected],
+    ["btn-share-migrate", connected && state.sources.length > 0],
+    ["btn-share-sync", connected && state.sources.length > 0],
+    ["btn-share-disconnect", connected],
+    ["share-auto-field", connected],
+  ]) shareEl(id).hidden = !show;
+  shareEl("share-auto").checked = state.share.auto;
+  shareEl("btn-share-reconnect").hidden = connected || !state.share.saved;
+}
+
+/** 変更のたびに呼ばれる。自動書き出しが有効なら、少し待ってからまとめて書く */
+function scheduleSharePush() {
+  const sh = state.share;
+  if (!sh.dir || !sh.auto || sh.suppress) return;
+  if (sh.timer) clearTimeout(sh.timer);
+  sh.timer = setTimeout(() => { sh.timer = null; sharePush({ silent: true }); }, SHARE_PUSH_DELAY);
+}
+
+function sharePayload() {
+  return {
+    sources: state.sources,
+    overrides: state.overrides,
+    interestPolicy: state.interestPolicy,
+  };
+}
+
+async function sharePush({ prune = false, silent = false } = {}) {
+  const sh = state.share;
+  if (!sh.dir || sh.busy) return false;
+  sh.busy = true;
+  try {
+    if (!silent) shareStatus("共有フォルダへ書き出しています…");
+    const res = await shareWrite(sh.dir, sharePayload(), { prune, scheme: sh.scheme });
+    sh.stamps = res.stamps;
+    sh.scheme = res.scheme;
+    shareEl("share-update").hidden = true;
+    const note = res.scheme === "ascii"
+      ? " ※この置き場所は日本語のファイル名を作れないため、英数字のファイル名で保存しています"
+      : "";
+    shareStatus(`共有フォルダへ書き出しました(${state.sources.length}ファイル / ${new Date().toLocaleTimeString("ja-JP")})${note}`, "ok");
+    return true;
+  } catch (err) {
+    shareStatus(`共有フォルダへ書き出せませんでした: ${err.message}`, "ng");
+    return false;
+  } finally {
+    sh.busy = false;
+  }
+}
+
+async function sharePull() {
+  const sh = state.share;
+  if (!sh.dir || sh.busy) return false;
+  sh.busy = true;
+  try {
+    shareStatus("共有フォルダから読み込んでいます…");
+    const read = await shareRead(sh.dir);
+    sh.stamps = read.stamps;
+    if (read.scheme) sh.scheme = read.scheme;
+    shareEl("share-update").hidden = true;
+    if (read.sources.length === 0) {
+      shareStatus("共有フォルダにデータがありません。", "");
+      return false;
+    }
+    // 読み込んだ直後に書き戻さないよう、いったん自動書き出しを止める
+    sh.suppress = true;
+    state.overrides = read.overrides || {};
+    if (read.settings && INTEREST_POLICIES.some((p) => p.key === read.settings.interestPolicy)) {
+      state.interestPolicy = read.settings.interestPolicy;
+    }
+    applySources(read.sources);
+    sh.suppress = false;
+    const when = read.settings && read.settings.updatedAt
+      ? `(最終更新 ${new Date(read.settings.updatedAt).toLocaleString("ja-JP")})` : "";
+    shareStatus(`共有フォルダから ${read.sources.length}ファイルを読み込みました${when}`, "ok");
+    return true;
+  } catch (err) {
+    shareStatus(`共有フォルダから読み込めませんでした: ${err.message}`, "ng");
+    return false;
+  } finally {
+    sh.busy = false;
+    renderShare();
+  }
+}
+
+/** フォルダに接続したときの初期動作を決める */
+async function shareAfterConnect() {
+  const sh = state.share;
+  renderShare();
+  let peek;
+  try {
+    peek = await shareRead(sh.dir);
+  } catch (err) {
+    shareStatus(`共有フォルダを読めませんでした: ${err.message}`, "ng");
+    return;
+  }
+  sh.stamps = peek.stamps;
+  if (peek.scheme) sh.scheme = peek.scheme;
+  const folderHas = peek.sources.length > 0;
+  const localHas = state.sources.length > 0;
+
+  if (folderHas && !localHas) { await sharePull(); return; }
+  if (!folderHas && localHas) {
+    // 端末内のデータを、そのまま共有フォルダ管理へ移す
+    if (await sharePush({ prune: true })) {
+      shareStatus(`この端末のデータ(${state.sources.length}ファイル)を共有フォルダへ移しました。以後はこのフォルダが元データになります。`, "ok");
+    }
+    return;
+  }
+  if (folderHas && localHas) {
+    shareStatus(`共有フォルダに ${peek.sources.length}ファイル、この端末に ${state.sources.length}ファイルあります。どちらを使うか、下のボタンで選んでください。`, "");
+    return;
+  }
+  shareStatus("共有フォルダに接続しました。CSVを読み込むと、このフォルダに保存されます。", "ok");
+}
+
+async function shareConnect() {
+  try {
+    const handle = await sharePick();
+    if (!handle) return;
+    state.share.dir = handle;
+    state.share.saved = true;
+    await shareAfterConnect();
+  } catch (err) {
+    shareStatus(`フォルダを開けませんでした: ${err.message}`, "ng");
+  }
+  renderShare();
+}
+
+async function shareReconnect() {
+  try {
+    const handle = await shareRestore(true);
+    if (!handle || handle === "needs-permission") {
+      shareStatus("フォルダへのアクセスが許可されませんでした。", "ng");
+      renderShare();
+      return;
+    }
+    state.share.dir = handle;
+    await shareAfterConnect();
+  } catch (err) {
+    shareStatus(`再接続できませんでした: ${err.message}`, "ng");
+  }
+  renderShare();
+}
+
+async function shareDisconnect() {
+  if (state.share.timer) clearTimeout(state.share.timer);
+  state.share = { dir: null, auto: state.share.auto, stamps: new Map(), busy: false,
+    timer: null, suppress: false, scheme: null, saved: false };
+  try { await idbDelHandle(); } catch (_) { /* 無視 */ }
+  shareStatus("接続を解除しました。この端末のデータはそのまま残ります。", "");
+  renderShare();
+}
+
+/** 他の人がフォルダを更新していないか調べる(タブに戻ったときなど) */
+async function shareCheckUpdates() {
+  const sh = state.share;
+  if (!sh.dir || sh.busy) return;
+  try {
+    const now = await shareStamps(sh.dir);
+    const changed = shareDiff(sh.stamps, now);
+    if (changed.length === 0) return;
+    shareEl("share-update").hidden = false;
+    shareEl("share-update-text").textContent =
+      `共有フォルダが更新されています(${changed.length}件)。`;
+  } catch (_) { /* 権限切れなどは次の操作で気づける */ }
+}
+
+function bindShareUI() {
+  renderShare();
+  if (!shareSupported()) return;
+
+  shareEl("btn-share-pick").addEventListener("click", shareConnect);
+  shareEl("btn-share-reconnect").addEventListener("click", shareReconnect);
+  shareEl("btn-share-pull").addEventListener("click", () => sharePull());
+  shareEl("btn-share-reload").addEventListener("click", () => sharePull());
+  shareEl("btn-share-push").addEventListener("click", () => sharePush());
+  shareEl("btn-share-migrate").addEventListener("click", async () => {
+    if (await sharePush({ prune: true })) {
+      shareStatus(`この端末のデータ(${state.sources.length}ファイル)を共有フォルダへ移しました。`, "ok");
+    }
+  });
+  shareEl("btn-share-sync").addEventListener("click", () => sharePush({ prune: true }));
+  shareEl("btn-share-disconnect").addEventListener("click", shareDisconnect);
+  shareEl("share-auto").addEventListener("change", (ev) => {
+    state.share.auto = ev.target.checked;
+    try { localStorage.setItem(SHARE_AUTO_KEY, ev.target.checked ? "1" : "0"); } catch (_) { /* 無視 */ }
+    if (state.share.auto) scheduleSharePush();
+  });
+
+  // 他の人の更新に気づけるよう、戻ってきたタイミングで確認する
+  window.addEventListener("focus", () => shareCheckUpdates());
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) shareCheckUpdates();
+  });
+
+  try { state.share.auto = localStorage.getItem(SHARE_AUTO_KEY) !== "0"; } catch (_) { /* 無視 */ }
+
+  // 前回のフォルダがあれば、押すだけで戻れるようにしておく(再許可には操作が要る)
+  shareRestore(false).then((handle) => {
+    if (!handle) return;
+    state.share.saved = true;
+    if (handle === "needs-permission") {
+      shareStatus("前回の共有フォルダがあります。「共有フォルダに再接続」を押すと、選び直さずに使えます。", "");
+      renderShare();
+      return;
+    }
+    state.share.dir = handle;
+    shareAfterConnect().then(renderShare);
+  }).catch(() => { /* 無視 */ });
 }
 
 /* =========================================================
@@ -2251,4 +2518,7 @@ document.addEventListener("DOMContentLoaded", () => {
       applySources(saved.sources);
     }
   } catch (_) { /* 無視 */ }
+
+  renderTabs();
+  bindShareUI();
 });
