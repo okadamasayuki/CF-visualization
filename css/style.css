@@ -181,10 +181,8 @@ select {
 }
 select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
+/* 縦スクロールで内容の上に乗ってこないよう、追従はさせない */
 .selector-bar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   display: flex;
   gap: 20px;
   flex-wrap: wrap;
@@ -231,7 +229,8 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .field.checkbox { cursor: pointer; }
 .field.checkbox input { margin: 0; }
 
-.sheet-scroll { max-height: 620px; overflow: auto; border: 1px solid var(--grid); border-radius: 8px; }
+/* 上下は入れ子でスクロールさせない(ページごと縦に伸ばす)。横だけスクロールする */
+.sheet-scroll { overflow-x: auto; border: 1px solid var(--grid); border-radius: 8px; }
 .sheet {
   border-collapse: separate;
   border-spacing: 0;
@@ -246,9 +245,6 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   text-align: left;
 }
 .sheet thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   background: var(--page);
   color: var(--text-secondary);
   font-weight: 600;
@@ -257,7 +253,7 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .sheet .rownum {
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: 2;
   background: var(--page);
   color: var(--text-muted);
   text-align: right;
@@ -691,6 +687,8 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   border-bottom: 1px solid var(--grid);
 }
 .statement tr.item td:first-child { padding-left: 24px; color: var(--text-secondary); }
+/* 項目構成を確認できるよう0の行も出すが、金額のある行より控えめにする */
+.statement tr.is-zero td { color: var(--text-muted); }
 .statement tr.subtotal td {
   border-top: 1px solid var(--baseline);
   font-weight: 600;

@@ -890,21 +890,28 @@ function renderStatement(cf) {
     tr.append(td);
     table.append(tr);
   };
-  // 金額ゼロの明細行は省略(構造行は常に表示)
-  const items = (list) => list.filter((i) => i.always || Math.abs(i.value) >= 0.005);
+  // 項目構成を確認できるよう、金額が0の行も省略せず表示する
+  const items = (list) => {
+    for (const i of list) {
+      const tr = el("tr", { class: Math.abs(i.value) < 0.005 ? "item is-zero" : "item" });
+      tr.append(el("td", { text: i.label }));
+      tr.append(el("td", { class: "amount", text: fmt(i.value) }));
+      table.append(tr);
+    }
+  };
 
   row("head", "Ⅰ 営業活動によるキャッシュ・フロー", null);
-  for (const i of items(cf.operatingItems)) row("item", i.label, i.value);
+  items(cf.operatingItems);
   row("section-total", "営業活動によるキャッシュ・フロー 合計", cf.operatingCF);
 
   row("head", "Ⅱ 投資活動によるキャッシュ・フロー", null);
-  for (const i of items(cf.investingItems)) row("item", i.label, i.value);
+  items(cf.investingItems);
   row("section-total", "投資活動によるキャッシュ・フロー 合計", cf.investingCF);
 
   row("free", "フリー・キャッシュ・フロー", cf.freeCF);
 
   row("head", "Ⅲ 財務活動によるキャッシュ・フロー", null);
-  for (const i of items(cf.financingItems)) row("item", i.label, i.value);
+  items(cf.financingItems);
   row("section-total", "財務活動によるキャッシュ・フロー 合計", cf.financingCF);
 
   // 換算差額がある場合は3区分の外に置き、以降の番号を繰り下げる
