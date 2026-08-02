@@ -184,6 +184,88 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   border-radius: 10px;
 }
 
+/* ---- タブ ---- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 20px 0 0;
+  border-bottom: 1px solid var(--grid);
+  overflow-x: auto;
+}
+.tab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 9px 14px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text-primary); }
+.tab[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+.panel { padding-top: 16px; }
+.panel:focus { outline: none; }
+
+/* ---- データ(CSVプレビュー) ---- */
+.data-controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.field.checkbox { cursor: pointer; }
+.field.checkbox input { margin: 0; }
+
+.sheet-scroll { max-height: 620px; overflow: auto; border: 1px solid var(--grid); border-radius: 8px; }
+.sheet {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sheet th, .sheet td {
+  border-right: 1px solid var(--grid);
+  border-bottom: 1px solid var(--grid);
+  padding: 4px 10px;
+  text-align: left;
+}
+.sheet thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--page);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+/* 行番号の列は左に固定し、Excelのような見た目にする */
+.sheet .rownum {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--page);
+  color: var(--text-muted);
+  text-align: right;
+  font-weight: 400;
+  min-width: 52px;
+}
+.sheet thead .rownum { z-index: 3; }
+.sheet tbody tr:hover td { background: var(--accent-wash); }
+.sheet td.numeric { text-align: right; }
+.sheet td.empty { color: var(--text-muted); }
+
+.sheet-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+}
+.sheet-foot .table-hint { margin: 0; }
+
 /* ---- 系列の色(預け金 / 借入金) ---- */
 .series-s1 { --series: var(--pos); }
 .series-s2 { --series: var(--series-2); }

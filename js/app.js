@@ -15,7 +15,14 @@ const state = {
   sort: { key: null, dir: 1 },
   trendMode: "balance", // balance | delta
   sources: [],
+  tab: "summary",
+  previews: new Map(),  // ファイル名 → CSVプレビュー(必要になったとき作る)
+  dataFile: 0,
+  dataFilter: true,
+  dataLimit: 200,
 };
+
+const DATA_PAGE = 500; // 「さらに表示」で増やす行数
 
 /** 全社比較で選べる指標 */
 const MEASURES = [
@@ -295,14 +302,12 @@ function trendWindow() {
 }
 
 function renderTrend() {
-  const section = document.getElementById("trend");
   const svg = document.getElementById("trend-chart");
   const tooltip = document.getElementById("tr-tooltip");
   svg.innerHTML = "";
 
   const { series, window: win } = trendWindow();
   const enough = win.length >= 2;
-  section.hidden = win.length === 0;
   document.getElementById("trend-empty").hidden = enough;
   document.getElementById("trend-count").textContent = `直近${win.length}四半期`;
   if (!enough) return;
@@ -874,15 +879,150 @@ function renderMessages(errors, warnings) {
 }
 
 /* =========================================================
+ * データ(CSVプレビュー)
+ * ======================================================= */
+
+/**
+ * CSVを表示用に分解する。会社名・四半期は解析時と同じく直前の行から
+ * 引き継ぐので、絞り込みが実際の取り込み結果と一致する。
+ */
+function buildPreview(src) {
+  if (state.previews.has(src.name)) return state.previews.get(src.name);
+
+  const rows = parseDelimited(src.text, detectDelimiter(src.text));
+  const layout = findHeader(rows) || inferLayout(rows);
+  const cols = layout ? layout.cols : null;
+  const header = layout && layout.headerRow >= 0 ? rows[layout.headerRow] : null;
+
+  const out = [];
+  let company = baseName(src.name);
+  let period = NO_PERIOD.label;
+  for (let i = layout ? layout.headerRow + 1 : 0; i < rows.length; i++) {
+    if (cols && cols.company !== null) {
+      const c = (rows[i][cols.company] || "").trim();
+      if (c !== "") company = c;
+    }
+    if (cols && cols.period !== null) {
+      const p = parsePeriod(rows[i][cols.period]);
+      if (p) period = p.label;
+    }
+    out.push({ n: i + 1, cells: rows[i], company, period });
+  }
+
+  const width = Math.max(header ? header.length : 0, ...out.map((r) => r.cells.length), 1);
+  const preview = { header, rows: out, cols, width };
+  state.previews.set(src.name, preview);
+  return preview;
+}
+
+function renderData() {
+  const table = document.getElementById("data-table");
+  table.innerHTML = "";
+  if (state.sources.length === 0) return;
+
+  const fileSelect = document.getElementById("data-file");
+  if (fileSelect.options.length !== state.sources.length) {
+    fileSelect.innerHTML = "";
+    state.sources.forEach((s, i) => fileSelect.append(el("option", { value: String(i), text: s.name })));
+  }
+  fileSelect.value = String(state.dataFile);
+  document.getElementById("data-file-field").hidden = state.sources.length <= 1;
+
+  const src = state.sources[state.dataFile] || state.sources[0];
+  const preview = buildPreview(src);
+  const all = preview.rows;
+  const filtered = state.dataFilter
+    ? all.filter((r) => r.company === state.company && r.period === state.period)
+    : all;
+  const shown = filtered.slice(0, state.dataLimit);
+
+  document.getElementById("data-count").textContent = `${all.length.toLocaleString("ja-JP")}行`;
+
+  // --- 見出し(行番号 + CSVの列) ---
+  const htr = el("tr");
+  htr.append(el("th", { class: "rownum", scope: "col", text: "行" }));
+  for (let c = 0; c < preview.width; c++) {
+    const name = preview.header && preview.header[c] ? preview.header[c].trim() : `列${c + 1}`;
+    htr.append(el("th", { scope: "col", text: name || `列${c + 1}` }));
+  }
+  table.append(el("thead", {}, htr));
+
+  // --- 明細 ---
+  const tbody = el("tbody");
+  for (const row of shown) {
+    const tr = el("tr");
+    tr.append(el("th", { class: "rownum", scope: "row", text: String(row.n) }));
+    for (let c = 0; c < preview.width; c++) {
+      const raw = row.cells[c] === undefined ? "" : String(row.cells[c]).trim();
+      tr.append(el("td", {
+        class: raw === "" ? "empty" : isAmountLike(raw) ? "numeric" : "",
+        text: raw === "" ? "—" : raw,
+      }));
+    }
+    tbody.append(tr);
+  }
+  table.append(tbody);
+
+  const scope = state.dataFilter ? `${state.company} / ${state.period} の` : "全";
+  document.getElementById("data-shown").textContent = filtered.length === 0
+    ? `${scope}行はありません。`
+    : `${scope}${filtered.length.toLocaleString("ja-JP")}行のうち ${shown.length.toLocaleString("ja-JP")}行を表示中`;
+  document.getElementById("data-more").hidden = shown.length >= filtered.length;
+}
+
+/* =========================================================
+ * タブ
+ * ======================================================= */
+
+const TABS = [
+  { id: "summary" },
+  { id: "trend", needs: () => state.periods.length > 1 },
+  { id: "cf" },
+  { id: "overview", needs: () => state.companies.length > 1 },
+  { id: "data" },
+];
+
+function visibleTabs() {
+  return TABS.filter((t) => !t.needs || t.needs());
+}
+
+function selectTab(id) {
+  if (!visibleTabs().some((t) => t.id === id)) id = "summary";
+  state.tab = id;
+  for (const t of TABS) {
+    const btn = document.getElementById(`tab-${t.id}`);
+    const panel = document.getElementById(`panel-${t.id}`);
+    const active = t.id === id;
+    btn.setAttribute("aria-selected", String(active));
+    btn.tabIndex = active ? 0 : -1;
+    panel.hidden = !active;
+  }
+  // 表示された瞬間に最新の内容を描く(重い「データ」タブは開くまで作らない)
+  if (id === "data") renderData();
+  if (id === "trend") renderTrend();
+  if (id === "overview") { renderOverviewChart(); renderOverviewTable(); }
+}
+
+function renderTabs() {
+  const shown = visibleTabs().map((t) => t.id);
+  for (const t of TABS) {
+    document.getElementById(`tab-${t.id}`).hidden = !shown.includes(t.id);
+  }
+  selectTab(shown.includes(state.tab) ? state.tab : "summary");
+}
+
+/* =========================================================
  * 画面の組み立て
  * ======================================================= */
 
 function selectCompany(name) {
   if (!state.byKey.has(keyOf(name, state.period))) return;
   state.company = name;
+  state.dataLimit = 200;
   document.getElementById("company-select").value = name;
   renderAll();
-  document.getElementById("summary").scrollIntoView({ behavior: "smooth", block: "start" });
+  selectTab("summary");
+  document.getElementById("tablist").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderSelectors() {
@@ -911,22 +1051,15 @@ function renderAll() {
   const dataset = currentDataset();
   const multi = state.companies.length > 1;
 
-  document.getElementById("summary").hidden = !dataset;
-  document.getElementById("cf-section").hidden = !dataset;
-  document.getElementById("overview").hidden = !multi;
-  document.getElementById("empty-state").hidden = true;
+  document.getElementById("workspace").hidden = !dataset;
+  document.getElementById("empty-state").hidden = !!dataset;
   document.getElementById("btn-clear").hidden = false;
-  document.getElementById("btn-export").hidden = false;
-
-  if (!dataset) {
-    renderChecks([]);
-    document.getElementById("trend").hidden = true;
-    return;
-  }
+  document.getElementById("btn-export").hidden = !dataset;
+  if (!dataset) { renderChecks([]); return; }
 
   renderMetrics();
-  renderTrend();
   renderChecks(dataset.checks);
+  renderTrend();
 
   document.getElementById("statement-subject").textContent =
     `${dataset.company} / ${dataset.period.label}`;
@@ -951,12 +1084,13 @@ function renderAll() {
     renderOverviewChart();
     renderOverviewTable();
   }
+
+  renderTabs();
 }
 
 function showEmptyState() {
-  for (const id of ["selector-bar", "summary", "trend", "cf-section", "overview", "checks"]) {
-    document.getElementById(id).hidden = true;
-  }
+  document.getElementById("selector-bar").hidden = true;
+  document.getElementById("workspace").hidden = true;
   document.getElementById("empty-state").hidden = false;
   document.getElementById("btn-clear").hidden = true;
   document.getElementById("btn-export").hidden = true;
@@ -1070,6 +1204,10 @@ function applySources(sources) {
 
   buildState([...merged.values()], warnings);
   state.sources = sources;
+  state.previews = new Map();
+  state.dataFile = 0;
+  state.dataLimit = 200;
+  document.getElementById("data-file").innerHTML = "";
 
   const periodText = state.periods.length > 1 ? ` / ${state.periods.length}四半期` : "";
   status.textContent = `${label} を読み込みました(${state.companies.length}社${periodText} / ${matched}件の科目を認識)`;
@@ -1157,16 +1295,57 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("company-select").addEventListener("change", (ev) => {
     state.company = ev.target.value;
+    state.dataLimit = 200;
     renderAll();
+    if (state.tab === "data") renderData();
   });
   document.getElementById("period-select").addEventListener("change", (ev) => {
     state.period = ev.target.value;
+    state.dataLimit = 200;
     // 選んだ四半期にその会社のデータがなければ、ある会社へ寄せる
     if (!state.byKey.has(keyOf(state.company, state.period))) {
       const fallback = state.companies.find((c) => state.byKey.has(keyOf(c, state.period)));
       if (fallback) { state.company = fallback; document.getElementById("company-select").value = fallback; }
     }
     renderAll();
+    if (state.tab === "data") renderData();
+  });
+
+  // --- タブ(クリックと矢印キー) ---
+  for (const btn of document.querySelectorAll(".tab")) {
+    btn.addEventListener("click", () => selectTab(btn.dataset.tab));
+    btn.addEventListener("keydown", (ev) => {
+      // 起点は「選択中」ではなくフォーカス中のタブ(両者はずれることがある)
+      const ids = visibleTabs().map((t) => t.id);
+      const i = ids.indexOf(btn.dataset.tab);
+      if (i < 0) return;
+      let next = null;
+      if (ev.key === "ArrowRight") next = ids[(i + 1) % ids.length];
+      else if (ev.key === "ArrowLeft") next = ids[(i - 1 + ids.length) % ids.length];
+      else if (ev.key === "Home") next = ids[0];
+      else if (ev.key === "End") next = ids[ids.length - 1];
+      if (next) {
+        ev.preventDefault();
+        selectTab(next);
+        document.getElementById(`tab-${next}`).focus();
+      }
+    });
+  }
+
+  // --- データタブ ---
+  document.getElementById("data-file").addEventListener("change", (ev) => {
+    state.dataFile = Number(ev.target.value);
+    state.dataLimit = 200;
+    renderData();
+  });
+  document.getElementById("data-filter").addEventListener("change", (ev) => {
+    state.dataFilter = ev.target.checked;
+    state.dataLimit = 200;
+    renderData();
+  });
+  document.getElementById("data-more").addEventListener("click", () => {
+    state.dataLimit += DATA_PAGE;
+    renderData();
   });
   document.getElementById("measure-select").addEventListener("change", (ev) => {
     state.measure = ev.target.value;
