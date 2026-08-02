@@ -15,6 +15,8 @@ const SCHEMA = {
   bs: [
     { key: "cash", label: "現金及び預金", group: "資産",
       aliases: ["現金", "現金預金", "現金・預金", "現金及び現金同等物", "現預金"] },
+    { key: "deposits", label: "預け金", group: "資産",
+      aliases: ["預け金勘定", "関係会社預け金", "CMS預け金", "親会社預け金"] },
     { key: "receivables", label: "売上債権", group: "資産",
       aliases: ["売掛金", "受取手形", "受取手形及び売掛金", "売掛金及び受取手形", "売上債権(純額)"] },
     { key: "inventory", label: "棚卸資産", group: "資産",
@@ -39,6 +41,10 @@ const SCHEMA = {
 
   // PL: 当期のみ
   pl: [
+    { key: "revenue", label: "売上高",
+      aliases: ["営業収益", "売上収益", "収益", "売上"] },
+    { key: "operatingIncome", label: "営業利益",
+      aliases: ["営業損益", "事業利益"] },
     { key: "pretaxIncome", label: "税引前当期純利益",
       aliases: ["税金等調整前当期純利益", "税引前利益", "税引前当期利益"] },
     { key: "depreciation", label: "減価償却費",

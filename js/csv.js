@@ -72,6 +72,8 @@ function lookupItem(name) {
 const HEADER_ALIASES = {
   company: ["会社名", "会社", "企業名", "企業", "法人名", "社名", "銘柄", "銘柄名", "対象会社",
     "company", "companyname", "corporation", "entity", "firm", "ticker"],
+  period: ["四半期", "期", "期間", "会計期間", "決算期", "年度", "対象期間", "決算期間",
+    "quarter", "period", "term", "fy", "fiscalquarter", "yearquarter"],
   section: ["区分", "分類", "財務諸表", "表", "種別", "section", "category", "type", "sheet"],
   item: ["科目", "項目", "勘定科目", "名称", "内容", "変動事由", "item", "account", "name", "label"],
   prev: ["前期末", "前期", "前期末残高", "前期首", "期首", "期首残高", "前年度", "前事業年度", "前連結会計年度",
@@ -83,6 +85,39 @@ const HEADER_ALIASES = {
 const HEADER_INDEX = new Map();
 for (const [role, names] of Object.entries(HEADER_ALIASES)) {
   for (const n of names) HEADER_INDEX.set(normalizeKey(n), role);
+}
+
+/* ---------- 四半期の解釈 ---------- */
+
+const NO_PERIOD = { label: "通期", year: null, q: null, sortKey: "0" };
+
+function makePeriod(year, q, label) {
+  return { label, year, q, sortKey: `${String(year).padStart(4, "0")}${q}` };
+}
+
+/**
+ * 「2025Q1」「FY2025Q1」「2025年度第1四半期」「2025年1Q」「1Q2025」「2025-03」などを解釈する。
+ * 解釈できない表記はそのまま表示名として使い、並び順は文字列順になる。
+ */
+function parsePeriod(raw) {
+  const s = String(raw == null ? "" : raw).normalize("NFKC").trim();
+  if (s === "") return null;
+  const t = s.replace(/[\s　]/g, "").toUpperCase();
+  let m;
+
+  // 2025Q1 / FY2025Q1 / 2025-Q1 / 2025年度第1四半期
+  if ((m = t.match(/^(?:FY)?(\d{4})\D{0,4}Q?([1-4])(?:期|四半期)?$/))) return makePeriod(+m[1], +m[2], s);
+  // 2025年1Q / 20251Q
+  if ((m = t.match(/^(?:FY)?(\d{4})\D{0,4}([1-4])Q$/))) return makePeriod(+m[1], +m[2], s);
+  // Q1 2025 / 1Q2025
+  if ((m = t.match(/^Q?([1-4])Q?(?:FY)?(\d{4})$/))) return makePeriod(+m[2], +m[1], s);
+  // FY25Q1
+  if ((m = t.match(/^FY(\d{2})Q?([1-4])$/))) return makePeriod(2000 + +m[1], +m[2], s);
+  // 2025-03 / 2025/3(暦年の月から四半期を求める)
+  if ((m = t.match(/^(\d{4})[-/.](\d{1,2})$/)) && +m[2] >= 1 && +m[2] <= 12) {
+    return makePeriod(+m[1], Math.ceil(+m[2] / 3), s);
+  }
+  return { label: s, year: null, q: null, sortKey: `zz${s}` };
 }
 
 /* ---------- 文字コードの判定とデコード ---------- */
@@ -173,7 +208,7 @@ function isAmountLike(raw) {
  */
 function findHeader(rows) {
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
-    const cols = { company: null, section: null, item: null, prev: null, curr: null };
+    const cols = { company: null, period: null, section: null, item: null, prev: null, curr: null };
     let amountCols = 0;
     rows[r].forEach((cell, c) => {
       const role = HEADER_INDEX.get(normalizeKey(cell));
@@ -206,6 +241,7 @@ function inferLayout(rows) {
     headerRow: -1,
     cols: {
       company: null,
+      period: null,
       section: null,
       item: itemCol,
       prev: amountCols.length >= 2 ? amountCols[0] : null,
@@ -219,13 +255,13 @@ function inferLayout(rows) {
 /**
  * @param {string} text CSV本文
  * @param {string} defaultCompany 会社名の列がない場合に使う名前(通常はファイル名)
- * @returns {{companies: {name, data}[], ok, errors[], warnings[], matched, recognized, unmatched[]}}
+ * @returns {{datasets: {company, period, data, hasPrev}[], ok, errors[], warnings[], matched, recognized, unmatched[]}}
  */
 function parseFinancialCSV(text, defaultCompany = "対象会社") {
   const errors = [];
   const warnings = [];
   const fail = (msg) => ({
-    companies: [], ok: false, errors: [msg], warnings, matched: 0, recognized: 0, unmatched: [],
+    datasets: [], ok: false, errors: [msg], warnings, matched: 0, recognized: 0, unmatched: [],
   });
 
   const rows = parseDelimited(text, detectDelimiter(text));
@@ -247,12 +283,16 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
   let matched = 0;    // 金額まで取り込めた科目の行数
   let recognized = 0; // 科目名を認識できた行数(金額が空の行も含む)
 
-  // 会社名 → データ。会社名の列がなければ全行を1社として扱う
-  const companies = new Map();
+  // 「会社 × 四半期」ごとにデータを持つ。列がなければ1社・通期として扱う
+  const datasets = new Map();
   let lastCompany = "";
-  const dataFor = (name) => {
-    if (!companies.has(name)) companies.set(name, emptyData());
-    return companies.get(name);
+  let lastPeriod = null;
+  const datasetFor = (company, period) => {
+    const key = `${company}\u0000${period.label}`;
+    if (!datasets.has(key)) {
+      datasets.set(key, { company, period, data: emptyData(), hasPrev: false });
+    }
+    return datasets.get(key);
   };
 
   for (let r = layout.headerRow + 1; r < rows.length; r++) {
@@ -261,13 +301,19 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
     const rawName = (row[cols.item] || "").trim();
     if (rawName === "") continue;
 
-    // 会社名が空のセルは直前の行から引き継ぐ(先頭行にだけ社名がある表に対応)
+    // 会社名・四半期が空のセルは直前の行から引き継ぐ(先頭行にだけ書く表に対応)
     if (cols.company !== null) {
       const c = (row[cols.company] || "").trim();
       if (c !== "") lastCompany = c;
     }
+    if (cols.period !== null) {
+      const p = parsePeriod(row[cols.period]);
+      if (p) lastPeriod = p;
+    }
     const companyName = cols.company !== null ? (lastCompany || defaultCompany) : defaultCompany;
-    const data = dataFor(companyName);
+    const period = (cols.period !== null && lastPeriod) ? lastPeriod : NO_PERIOD;
+    const dataset = datasetFor(companyName, period);
+    const data = dataset.data;
 
     const target = lookupItem(rawName);
     if (!target) {
@@ -278,7 +324,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
     }
     recognized++;
 
-    const put = (period, raw) => {
+    const put = (which, raw) => {
       let v = parseAmount(raw);
       if (v === null) return false;
       if (Number.isNaN(v)) {
@@ -290,8 +336,8 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
         warnings.push(`${lineNo}行目「${rawName}」は正の値で入力する科目です。${v} を ${Math.abs(v)} として扱います。`);
         v = Math.abs(v);
       }
-      const bucket = target.section === "bs" ? data.bs[period] : data[target.section];
-      const slot = `${companyName} ${target.section}:${target.key}:${period}`;
+      const bucket = target.section === "bs" ? data.bs[which] : data[target.section];
+      const slot = `${companyName}\u0000${period.label}\u0000${target.section}:${target.key}:${which}`;
       bucket[target.key] = (seen.has(slot) ? bucket[target.key] : 0) + v;
       seen.set(slot, true);
       return true;
@@ -299,7 +345,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
 
     let used = false;
     if (target.section === "bs") {
-      if (cols.prev !== null) used = put("prev", row[cols.prev]) || used;
+      if (cols.prev !== null && put("prev", row[cols.prev])) { used = true; dataset.hasPrev = true; }
       if (cols.curr !== null) used = put("curr", row[cols.curr]) || used;
     } else {
       // BS以外は1つの金額。当期列が空なら前期列の値を使う
@@ -325,7 +371,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
   }
 
   return {
-    companies: [...companies].map(([name, data]) => ({ name, data })),
+    datasets: [...datasets.values()],
     ok: errors.length === 0, errors, warnings, matched, recognized, unmatched,
   };
 }
@@ -333,29 +379,31 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
 /* ---------- テンプレートCSVの生成 ---------- */
 
 /**
- * @param {{name, data}[]|null} companies 省略すると空欄のひな形(2社分)を出力する
+ * @param {{company, period, data}[]|null} datasets 省略すると空欄のひな形を出力する
  */
-function buildTemplateCSV(companies = null) {
-  const lines = ["会社名,区分,科目,前期末,当期末"];
+function buildTemplateCSV(datasets = null) {
+  const lines = ["会社名,四半期,区分,科目,前期末,当期末"];
   const cell = (v) => (v === null || v === undefined ? "" : String(v));
-  // カンマや引用符を含む会社名をCSVとして正しく書き出す
+  // カンマや引用符を含む名前をCSVとして正しく書き出す
   const q = (s) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
 
-  const targets = companies && companies.length
-    ? companies
-    : [{ name: "A社", data: null }, { name: "B社", data: null }];
+  const targets = datasets && datasets.length ? datasets : [
+    { company: "A社", period: { label: "2025Q1" }, data: null },
+    { company: "A社", period: { label: "2025Q2" }, data: null },
+    { company: "B社", period: { label: "2025Q1" }, data: null },
+  ];
 
-  for (const { name, data } of targets) {
-    const n = q(name);
+  for (const { company, period, data } of targets) {
+    const head = `${q(company)},${q(period.label)}`;
     for (const f of DISPLAY_FIELDS.bs) {
       const prev = data ? cell(data.bs.prev[f.key]) : "";
       const curr = data ? cell(data.bs.curr[f.key]) : "";
-      lines.push(`${n},BS,${f.label},${prev},${curr}`);
+      lines.push(`${head},BS,${f.label},${prev},${curr}`);
     }
     for (const section of ["pl", "sup", "ss"]) {
       for (const f of DISPLAY_FIELDS[section]) {
         const curr = data ? cell(data[section][f.key]) : "";
-        lines.push(`${n},${SECTION_LABELS[section]},${f.label},,${curr}`);
+        lines.push(`${head},${SECTION_LABELS[section]},${f.label},,${curr}`);
       }
     }
   }

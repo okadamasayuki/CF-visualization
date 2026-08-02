@@ -1,14 +1,20 @@
 "use strict";
 
-const STORAGE_KEY = "cf-visualization-csv-v2";
+const STORAGE_KEY = "cf-visualization-csv-v3";
+const TREND_QUARTERS = 10; // 推移グラフに表示する四半期数
 
-/** 画面の状態 */
 const state = {
-  companies: [],      // [{ name, data, cf, checks }]
-  selected: 0,        // 明細を表示している会社のindex
+  datasets: [],       // [{ company, period, data, hasPrev, derivedPrev, cfAvailable, cf, checks, metrics }]
+  byKey: new Map(),   // "会社\u0000四半期" → dataset
+  byCompany: new Map(), // 会社 → 四半期昇順のdataset配列
+  companies: [],
+  periods: [],        // 四半期(昇順)
+  company: "",
+  period: "",
   measure: "operatingCF",
   sort: { key: null, dir: 1 },
-  sources: [],        // localStorage復元用 [{ name, text }]
+  trendMode: "balance", // balance | delta
+  sources: [],
 };
 
 /** 全社比較で選べる指標 */
@@ -16,9 +22,33 @@ const MEASURES = [
   { key: "operatingCF", label: "営業CF" },
   { key: "investingCF", label: "投資CF" },
   { key: "financingCF", label: "財務CF" },
-  { key: "freeCF", label: "フリーCF(営業+投資)" },
+  { key: "freeCF", label: "フリーCF" },
   { key: "netChange", label: "現金の増減額" },
   { key: "endingCash", label: "期末現金残高" },
+  { key: "revenue", label: "売上高" },
+  { key: "operatingIncome", label: "営業利益" },
+  { key: "ebitda", label: "EBITDA" },
+  { key: "workingCapital", label: "運転資金" },
+  { key: "interestBearingDebt", label: "有利子負債" },
+  { key: "netDebt", label: "ネット有利子負債" },
+  { key: "deposits", label: "預け金" },
+  { key: "roic", label: "ROIC", kind: "pct" },
+  { key: "equityRatio", label: "自己資本比率", kind: "pct" },
+];
+
+/** 全社サマリー表の列 */
+const OVERVIEW_COLS = [
+  { key: "name", label: "会社名", type: "text" },
+  { key: "revenue", label: "売上高" },
+  { key: "ebitda", label: "EBITDA" },
+  { key: "roic", label: "ROIC", kind: "pct" },
+  { key: "workingCapital", label: "運転資金" },
+  { key: "interestBearingDebt", label: "有利子負債" },
+  { key: "deposits", label: "預け金" },
+  { key: "operatingCF", label: "営業CF" },
+  { key: "freeCF", label: "フリーCF" },
+  { key: "endingCash", label: "期末残高" },
+  { key: "ok", label: "整合", type: "check" },
 ];
 
 /* =========================================================
@@ -38,6 +68,7 @@ function el(tag, attrs = {}, ...children) {
 
 // 会計表記: 負の値は △1,234
 function fmt(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
   const rounded = Math.round(value * 100) / 100;
   const abs = Math.abs(rounded).toLocaleString("ja-JP", { maximumFractionDigits: 2 });
   return rounded < 0 ? `△${abs}` : abs;
@@ -45,10 +76,27 @@ function fmt(value) {
 
 // チャート・ツールチップ用: +1,234 / −1,234
 function fmtSigned(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
   const abs = Math.abs(value).toLocaleString("ja-JP", { maximumFractionDigits: 2 });
   if (value > 0) return `+${abs}`;
   if (value < 0) return `−${abs}`;
   return abs;
+}
+
+function fmtPct(value, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  const v = value * 100;
+  return `${v < 0 ? "△" : ""}${Math.abs(v).toFixed(digits)}%`;
+}
+
+/** 指標の種類に応じた表示 */
+function fmtBy(kind, value) {
+  return kind === "pct" ? fmtPct(value) : fmt(value);
+}
+
+/** 軸ラベル用の短い四半期表記(2025Q1 → 25Q1) */
+function shortPeriod(period) {
+  return period.q ? `${String(period.year).slice(-2)}Q${period.q}` : period.label;
 }
 
 function downloadText(filename, text) {
@@ -62,6 +110,12 @@ function downloadText(filename, text) {
   URL.revokeObjectURL(url);
 }
 
+const keyOf = (company, periodLabel) => `${company}\u0000${periodLabel}`;
+
+function currentDataset() {
+  return state.byKey.get(keyOf(state.company, state.period)) || null;
+}
+
 /* =========================================================
  * CF計算(間接法)
  * ======================================================= */
@@ -69,7 +123,6 @@ function downloadText(filename, text) {
 function computeCF({ bs, pl, sup, ss }) {
   const d = (key) => bs.curr[key] - bs.prev[key]; // 当期末 − 前期末
 
-  // --- 営業活動によるキャッシュ・フロー ---
   const operatingItems = [
     { label: "税引前当期純利益", value: pl.pretaxIncome, always: true },
     { label: "減価償却費", value: pl.depreciation },
@@ -90,7 +143,6 @@ function computeCF({ bs, pl, sup, ss }) {
   ];
   const operatingCF = subtotal + afterSubtotalItems.reduce((s, i) => s + i.value, 0);
 
-  // --- 投資活動によるキャッシュ・フロー ---
   // 売却簿価 = 売却収入 − 売却損益、取得額 = ΔPPE + 減価償却費 + 売却簿価
   const bookValueSold = sup.saleProceeds - pl.gainOnSale;
   const tangibleAcquired = d("tangible") + pl.depreciation + bookValueSold;
@@ -98,10 +150,10 @@ function computeCF({ bs, pl, sup, ss }) {
     { label: "有形固定資産の取得による支出", value: -tangibleAcquired },
     { label: "有形固定資産の売却による収入", value: sup.saleProceeds },
     { label: d("investments") >= 0 ? "投資その他の資産の取得による支出" : "投資その他の資産の減少による収入", value: -d("investments") },
+    { label: d("deposits") >= 0 ? "預け金の預入による支出" : "預け金の払戻による収入", value: -d("deposits") },
   ];
   const investingCF = investingItems.reduce((s, i) => s + i.value, 0);
 
-  // --- 財務活動によるキャッシュ・フロー ---
   const financingItems = [
     { label: "短期借入金の純増減額", value: d("shortLoans") },
     { label: d("longLoans") >= 0 ? "長期借入れによる収入(純額)" : "長期借入金の返済による支出(純額)", value: d("longLoans") },
@@ -114,14 +166,13 @@ function computeCF({ bs, pl, sup, ss }) {
 
   const netChange = operatingCF + investingCF + financingCF;
   const beginningCash = bs.prev.cash;
-  const endingCash = beginningCash + netChange;
 
   return {
     operatingItems, subtotal, afterSubtotalItems, operatingCF,
     investingItems, investingCF,
     financingItems, financingCF,
     freeCF: operatingCF + investingCF,
-    netChange, beginningCash, endingCash,
+    netChange, beginningCash, endingCash: beginningCash + netChange,
   };
 }
 
@@ -130,12 +181,13 @@ function computeCF({ bs, pl, sup, ss }) {
  * ======================================================= */
 
 function computeChecks({ bs, pl, ss }, cf) {
-  const assets = (p) => bs[p].cash + bs[p].receivables + bs[p].inventory +
+  const assets = (p) => bs[p].cash + bs[p].deposits + bs[p].receivables + bs[p].inventory +
     bs[p].otherCA + bs[p].tangible + bs[p].investments;
   const liabilities = (p) => bs[p].payables + bs[p].shortLoans + bs[p].otherCL + bs[p].longLoans;
 
   const checks = [];
-  for (const [p, name] of [["prev", "前期末"], ["curr", "当期末"]]) {
+  const periods = cf ? [["prev", "期首"], ["curr", "期末"]] : [["curr", "期末"]];
+  for (const [p, name] of periods) {
     const diff = assets(p) - (liabilities(p) + bs[p].netAssets);
     checks.push({
       ok: Math.abs(diff) < 0.5,
@@ -146,26 +198,27 @@ function computeChecks({ bs, pl, ss }, cf) {
     });
   }
 
-  const cashDiff = cf.endingCash - bs.curr.cash;
-  checks.push({
-    ok: Math.abs(cashDiff) < 0.5,
-    title: "CF計算書とBSの現金残高の整合",
-    detail: Math.abs(cashDiff) < 0.5
-      ? `計算上の期末残高 ${fmt(cf.endingCash)} = BSの現金及び預金 ${fmt(bs.curr.cash)}`
-      : `計算上の期末残高 ${fmt(cf.endingCash)} と BSの現金及び預金 ${fmt(bs.curr.cash)} に差額 ${fmt(cashDiff)} があります。CSVの入力値をご確認ください。`,
-  });
+  if (cf) {
+    const cashDiff = cf.endingCash - bs.curr.cash;
+    checks.push({
+      ok: Math.abs(cashDiff) < 0.5,
+      title: "CF計算書とBSの現金残高の整合",
+      detail: Math.abs(cashDiff) < 0.5
+        ? `計算上の期末残高 ${fmt(cf.endingCash)} = BSの現金及び預金 ${fmt(bs.curr.cash)}`
+        : `計算上の期末残高 ${fmt(cf.endingCash)} と BSの現金及び預金 ${fmt(bs.curr.cash)} に差額 ${fmt(cashDiff)} があります。`,
+    });
 
-  const netIncome = pl.pretaxIncome - pl.incomeTaxes;
-  const expectedEquityChange = netIncome + ss.stockIssue - ss.dividendsPaid - ss.treasuryBuy + ss.treasurySell;
-  const equityDiff = (bs.curr.netAssets - bs.prev.netAssets) - expectedEquityChange;
-  checks.push({
-    ok: Math.abs(equityDiff) < 0.5,
-    title: "SSと純資産増減の整合(参考)",
-    detail: Math.abs(equityDiff) < 0.5
-      ? `純資産の増減 ${fmt(bs.curr.netAssets - bs.prev.netAssets)} = 当期純利益 + 増資 − 配当 − 自己株式取得 + 自己株式処分`
-      : `純資産の増減 ${fmt(bs.curr.netAssets - bs.prev.netAssets)} と 変動事由の合計 ${fmt(expectedEquityChange)} に差額 ${fmt(equityDiff)} があります(その他の変動事由がある場合は差額が出ます)。`,
-  });
-
+    const netIncome = pl.pretaxIncome - pl.incomeTaxes;
+    const expected = netIncome + ss.stockIssue - ss.dividendsPaid - ss.treasuryBuy + ss.treasurySell;
+    const equityDiff = (bs.curr.netAssets - bs.prev.netAssets) - expected;
+    checks.push({
+      ok: Math.abs(equityDiff) < 0.5,
+      title: "SSと純資産増減の整合(参考)",
+      detail: Math.abs(equityDiff) < 0.5
+        ? `純資産の増減 ${fmt(bs.curr.netAssets - bs.prev.netAssets)} = 純利益 + 増資 − 配当 − 自己株式取得 + 自己株式処分`
+        : `純資産の増減 ${fmt(bs.curr.netAssets - bs.prev.netAssets)} と 変動事由の合計 ${fmt(expected)} に差額 ${fmt(equityDiff)} があります(その他の変動事由がある場合は差額が出ます)。`,
+    });
+  }
   return checks;
 }
 
@@ -181,7 +234,6 @@ function svgEl(tag, attrs = {}) {
   return node;
 }
 
-// 軸の目盛りをキリのよい数値に丸める
 function niceTicks(min, max, count = 5) {
   const span = max - min || 1;
   const rawStep = span / count;
@@ -194,18 +246,28 @@ function niceTicks(min, max, count = 5) {
   return ticks;
 }
 
-/** バーのデータ側の端だけ角を丸めたパス(横向き) */
+/** データ側の端だけ角を丸めた横向きバー */
 function hBarPath(x0, x1, yTop, h, r = 4) {
   const w = Math.abs(x1 - x0);
   const rr = Math.min(r, w, h / 2);
   const yBot = yTop + h;
-  if (x1 >= x0) { // 右向き:右端を丸める
+  if (x1 >= x0) {
     return `M${x0},${yTop} L${x1 - rr},${yTop} Q${x1},${yTop} ${x1},${yTop + rr} L${x1},${yBot - rr} Q${x1},${yBot} ${x1 - rr},${yBot} L${x0},${yBot} Z`;
   }
   return `M${x0},${yTop} L${x1 + rr},${yTop} Q${x1},${yTop} ${x1},${yTop + rr} L${x1},${yBot - rr} Q${x1},${yBot} ${x1 + rr},${yBot} L${x0},${yBot} Z`;
 }
 
-/** マウス位置にツールチップを出す(横スクロール中でも追従させる) */
+/** データ側の端だけ角を丸めた縦向きバー */
+function vBarPath(x, w, yBase, yValue, r = 4) {
+  const up = yValue <= yBase;
+  const h = Math.abs(yBase - yValue);
+  const rr = Math.min(r, h, w / 2);
+  if (up) {
+    return `M${x},${yBase} L${x},${yValue + rr} Q${x},${yValue} ${x + rr},${yValue} L${x + w - rr},${yValue} Q${x + w},${yValue} ${x + w},${yValue + rr} L${x + w},${yBase} Z`;
+  }
+  return `M${x},${yBase} L${x + w},${yBase} L${x + w},${yValue - rr} Q${x + w},${yValue} ${x + w - rr},${yValue} L${x + rr},${yValue} Q${x},${yValue} ${x},${yValue - rr} Z`;
+}
+
 function positionTooltip(tooltip, svg, ev) {
   const wrapEl = svg.parentElement;
   const wrap = wrapEl.getBoundingClientRect();
@@ -217,8 +279,250 @@ function positionTooltip(tooltip, svg, ev) {
 }
 
 /* =========================================================
- * 全社比較チャート(横向きの発散バー)
+ * 預け金・借入金の推移(選択中の会社)
  * ======================================================= */
+
+const TREND_SERIES = [
+  { key: "deposits", label: "預け金", cls: "s1" },
+  { key: "interestBearingDebt", label: "借入金(有利子負債)", cls: "s2" },
+];
+
+function trendWindow() {
+  const series = state.byCompany.get(state.company) || [];
+  const at = series.findIndex((d) => d.period.label === state.period);
+  const end = at >= 0 ? at + 1 : series.length;
+  return { series, window: series.slice(Math.max(0, end - TREND_QUARTERS), end) };
+}
+
+function renderTrend() {
+  const section = document.getElementById("trend");
+  const svg = document.getElementById("trend-chart");
+  const tooltip = document.getElementById("tr-tooltip");
+  svg.innerHTML = "";
+
+  const { series, window: win } = trendWindow();
+  const enough = win.length >= 2;
+  section.hidden = win.length === 0;
+  document.getElementById("trend-empty").hidden = enough;
+  document.getElementById("trend-count").textContent = `直近${win.length}四半期`;
+  if (!enough) return;
+
+  const delta = state.trendMode === "delta";
+  const valueAt = (d, key) => {
+    if (!delta) return d.metrics[key];
+    const i = series.indexOf(d);
+    const prev = i > 0 ? series[i - 1] : null;
+    return prev ? d.metrics[key] - prev.metrics[key] : null;
+  };
+
+  const points = win.map((d) => ({
+    period: d.period,
+    values: TREND_SERIES.map((s) => valueAt(d, s.key)),
+  }));
+  const all = points.flatMap((p) => p.values).filter((v) => v !== null);
+  if (all.length === 0) return;
+
+  const W = 720, H = 300;
+  const M = { top: 20, right: 78, bottom: 40, left: 84 }; // 右は終点ラベルの分を空ける
+  const plotW = W - M.left - M.right;
+  const plotH = H - M.top - M.bottom;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+  const dataMin = Math.min(0, ...all);
+  const dataMax = Math.max(0, ...all);
+  const pad = (dataMax - dataMin || 1) * 0.08;
+  const ticks = niceTicks(dataMin - (dataMin < 0 ? pad : 0), dataMax + pad);
+  const lo = Math.min(dataMin, ticks[0]);
+  const hi = Math.max(dataMax, ticks[ticks.length - 1]);
+  const y = (v) => M.top + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
+  const band = plotW / points.length;
+  const cx = (i) => M.left + band * i + band / 2;
+
+  for (const t of ticks) {
+    svg.append(svgEl("line", {
+      class: t === 0 ? "baseline" : "grid-line",
+      x1: M.left, x2: M.left + plotW, y1: y(t), y2: y(t),
+    }));
+    const lbl = svgEl("text", { class: "tick-label", x: M.left - 8, y: y(t) + 4, "text-anchor": "end" });
+    lbl.textContent = fmtSigned(t).replace("+", "");
+    svg.append(lbl);
+  }
+
+  points.forEach((p, i) => {
+    const lbl = svgEl("text", { class: "cat-label", x: cx(i), y: H - 14, "text-anchor": "middle" });
+    lbl.textContent = shortPeriod(p.period);
+    svg.append(lbl);
+  });
+
+  if (delta) {
+    // 前四半期差は符号のあるフローなので、0を基準にした縦棒で表す
+    const BAR_W = Math.min(24, (band - 6) / 2);
+    points.forEach((p, i) => {
+      p.values.forEach((v, s) => {
+        if (v === null) return;
+        const x = cx(i) - BAR_W - 1 + s * (BAR_W + 2); // 2pxの隙間で隣り合わせる
+        svg.append(svgEl("path", {
+          class: `bar series-${TREND_SERIES[s].cls}`,
+          d: vBarPath(x, BAR_W, y(0), y(v)),
+        }));
+      });
+    });
+  } else {
+    TREND_SERIES.forEach((s, si) => {
+      const pts = points.map((p, i) => ({ x: cx(i), v: p.values[si] })).filter((p) => p.v !== null);
+      if (pts.length === 0) return;
+      svg.append(svgEl("path", {
+        class: `line series-${s.cls}`,
+        d: pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${y(p.v)}`).join(" "),
+      }));
+      for (const p of pts) {
+        svg.append(svgEl("circle", { class: `dot series-${s.cls}`, cx: p.x, cy: y(p.v), r: 4 }));
+      }
+    });
+
+    // 終点の直接ラベル(2本が近すぎるときは凡例とツールチップに任せる)
+    const ends = TREND_SERIES.map((s, si) => {
+      const last = [...points].reverse().find((p) => p.values[si] !== null);
+      return last ? { v: last.values[si], y: y(last.values[si]) } : null;
+    });
+    const labelX = cx(points.length - 1) + 10;
+    const roomy = ends.every((e) => !e || labelX + fmt(e.v).length * 7.5 <= W - 4);
+    if (ends[0] && ends[1] && Math.abs(ends[0].y - ends[1].y) >= 16 && roomy) {
+      for (const e of ends) {
+        const t = svgEl("text", { class: "value-label", x: labelX, y: e.y + 4, "text-anchor": "start" });
+        t.textContent = fmt(e.v);
+        svg.append(t);
+      }
+    }
+  }
+
+  // ホバー: 縦のクロスヘアと、その四半期の全系列を出すツールチップ
+  const crosshair = svgEl("line", { class: "crosshair", y1: M.top, y2: M.top + plotH, x1: 0, x2: 0 });
+  crosshair.style.display = "none";
+  svg.append(crosshair);
+
+  points.forEach((p, i) => {
+    const hit = svgEl("rect", { class: "hit", x: M.left + band * i, y: M.top, width: band, height: plotH });
+    hit.addEventListener("mousemove", (ev) => {
+      crosshair.style.display = "";
+      crosshair.setAttribute("x1", cx(i));
+      crosshair.setAttribute("x2", cx(i));
+      tooltip.hidden = false;
+      tooltip.innerHTML = "";
+      tooltip.append(el("div", { class: "tt-title", text: p.period.label }));
+      TREND_SERIES.forEach((s, si) => {
+        const row = el("div", { class: "tt-row" });
+        row.append(
+          el("span", { class: `tt-swatch series-${s.cls}` }),
+          el("span", { class: "tt-value", text: `${s.label}: ${delta ? fmtSigned(p.values[si]) : fmt(p.values[si])}` }),
+        );
+        tooltip.append(row);
+      });
+      positionTooltip(tooltip, svg, ev);
+    });
+    hit.addEventListener("mouseleave", () => {
+      tooltip.hidden = true;
+      crosshair.style.display = "none";
+    });
+    svg.append(hit);
+  });
+}
+
+/* =========================================================
+ * 財務指標(前年同期比)
+ * ======================================================= */
+
+/** 前年同期のデータセット。四半期が解釈できない場合は4つ前で代用する */
+function yoyDataset(dataset) {
+  const series = state.byCompany.get(dataset.company) || [];
+  if (dataset.period.year !== null) {
+    const want = series.find((d) =>
+      d.period.year === dataset.period.year - 1 && d.period.q === dataset.period.q);
+    if (want) return want;
+  }
+  const i = series.indexOf(dataset);
+  return i >= 4 ? series[i - 4] : null;
+}
+
+function renderMetrics() {
+  const dataset = currentDataset();
+  const table = document.getElementById("metrics-table");
+  table.innerHTML = "";
+  if (!dataset) return;
+
+  const prevYear = yoyDataset(dataset);
+  document.getElementById("metrics-subject").textContent =
+    `${dataset.company} / ${dataset.period.label}`;
+  document.getElementById("metrics-yoy-label").textContent =
+    prevYear ? `前年同期(${prevYear.period.label})との比較` : "前年同期のデータがないため、増減は表示できません";
+
+  const head = el("tr", {},
+    el("th", { class: "label-col", scope: "col", text: "指標" }),
+    el("th", { scope: "col", text: "当四半期" }),
+    el("th", { scope: "col", text: "前年同期" }),
+    el("th", { scope: "col", text: "増減" }),
+    el("th", { scope: "col", text: "増減率" }),
+  );
+  table.append(el("thead", {}, head));
+
+  const tbody = el("tbody");
+  for (const row of METRIC_ROWS) {
+    const cur = dataset.metrics[row.key];
+    const old = prevYear ? prevYear.metrics[row.key] : null;
+
+    const label = el("td", { class: "label" });
+    label.append(row.label);
+    if (row.note) label.append(el("span", { class: "metric-note", text: row.note }));
+    if (row.key === "roic" && dataset.metrics.roicBasis) {
+      label.append(el("span", { class: "metric-note", text: `年換算: ${dataset.metrics.roicBasis}` }));
+    }
+
+    const tr = el("tr", {}, label,
+      el("td", { class: "num", text: fmtBy(row.kind, cur) }),
+      el("td", { class: "num muted", text: fmtBy(row.kind, old) }),
+    );
+
+    // 比率はポイント差、金額は差額と変化率で見せる
+    let diff = null, rate = null;
+    if (cur !== null && old !== null && cur !== undefined && old !== undefined) {
+      diff = cur - old;
+      if (row.kind !== "pct" && old !== 0) rate = diff / Math.abs(old);
+    }
+    const diffText = diff === null ? "—"
+      : row.kind === "pct" ? `${diff < 0 ? "△" : "+"}${Math.abs(diff * 100).toFixed(1)}pt`
+        : fmtSigned(diff);
+    // 色は「増えたか」ではなく「良くなったか」で付ける(有利子負債の減少は改善)
+    let tone = "";
+    if (row.good && diff !== null && diff !== 0) {
+      const better = row.good === "up" ? diff > 0 : diff < 0;
+      tone = better ? "up" : "down";
+    }
+    tr.append(el("td", { class: `num ${tone}`, text: diffText }));
+    tr.append(el("td", {
+      class: "num", text: rate === null ? "—" : `${rate < 0 ? "△" : "+"}${Math.abs(rate * 100).toFixed(1)}%`,
+    }));
+    tbody.append(tr);
+  }
+  table.append(tbody);
+
+  const est = dataset.metrics.operatingIncomeEstimated;
+  document.getElementById("metrics-estimate-note").hidden = !est;
+}
+
+/* =========================================================
+ * 全社比較(選択中の四半期)
+ * ======================================================= */
+
+function overviewRows() {
+  return state.companies
+    .map((name) => state.byKey.get(keyOf(name, state.period)))
+    .filter(Boolean)
+    .map((d) => ({
+      name: d.company,
+      ok: d.checks.every((c) => c.ok),
+      ...d.metrics,
+    }));
+}
 
 function renderOverviewChart() {
   const svg = document.getElementById("overview-chart");
@@ -226,10 +530,16 @@ function renderOverviewChart() {
   svg.innerHTML = "";
 
   const measure = MEASURES.find((m) => m.key === state.measure);
-  // ランキングとして読ませるチャートなので、常に指標の降順に並べる
-  const items = state.companies
-    .map((c, index) => ({ index, name: c.name, value: c.cf[measure.key] }))
+  const items = overviewRows()
+    .map((r) => ({ name: r.name, value: r[measure.key] }))
+    .filter((r) => r.value !== null && r.value !== undefined && !Number.isNaN(r.value))
     .sort((a, b) => b.value - a.value);
+
+  const missing = overviewRows().length - items.length;
+  const note = document.getElementById("overview-missing");
+  note.hidden = missing === 0;
+  note.textContent = missing ? `${missing}社はこの指標を算出できないため、グラフから除いています。` : "";
+  if (items.length === 0) return;
 
   const ROW = 22, BAR_H = 12;
   const M = { top: 28, right: 76, bottom: 8, left: 132 };
@@ -240,7 +550,6 @@ function renderOverviewChart() {
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("height", H);
 
-  // 目盛りの丸めで軸が広がりすぎないよう、描画範囲はデータの幅に合わせる
   const values = items.map((i) => i.value);
   const lo = Math.min(0, ...values);
   const hi = Math.max(0, ...values);
@@ -248,25 +557,22 @@ function renderOverviewChart() {
   const ticks = niceTicks(lo, hi).filter((t) => t >= lo && t <= hi);
   if (!ticks.includes(0)) ticks.push(0);
 
-  // 目盛り線(0はベースラインとして少し濃く)
   for (const t of ticks) {
     svg.append(svgEl("line", {
       class: t === 0 ? "baseline" : "grid-line",
       x1: x(t), x2: x(t), y1: M.top - 6, y2: M.top + plotH,
     }));
     const lbl = svgEl("text", { class: "tick-label", x: x(t), y: M.top - 12, "text-anchor": "middle" });
-    lbl.textContent = fmtSigned(t) === "0" ? "0" : fmtSigned(t).replace("+", "");
+    lbl.textContent = measure.kind === "pct" ? fmtPct(t, 0) : fmtSigned(t).replace("+", "");
     svg.append(lbl);
   }
-
-  const maxIdx = 0, minIdx = items.length - 1; // 直接ラベルは両極だけに付ける
 
   items.forEach((item, i) => {
     const yTop = M.top + i * ROW + (ROW - BAR_H) / 2;
     const g = svgEl("g", { class: "band" });
 
     const name = svgEl("text", {
-      class: `cat-label row-name${item.index === state.selected ? " is-selected" : ""}`,
+      class: `cat-label row-name${item.name === state.company ? " is-selected" : ""}`,
       x: M.left - 10, y: yTop + BAR_H - 2, "text-anchor": "end",
     });
     name.textContent = item.name;
@@ -280,20 +586,18 @@ function renderOverviewChart() {
     }
 
     // 最大・最小だけ値を直接ラベルする(全行に付けると読めなくなるため)
-    if (i === maxIdx || i === minIdx) {
-      const text = fmtSigned(item.value);
-      const width = text.length * 7.5; // 12px semibold の概算
+    if (i === 0 || i === items.length - 1) {
+      const text = measure.kind === "pct" ? fmtPct(item.value) : fmtSigned(item.value);
+      const width = text.length * 7.5;
       const tip = x(item.value);
       const grows = item.value >= 0 ? 1 : -1;
-      // 先端の外側に置く。はみ出す場合は、その行では空いている0の反対側へ逃がす。
-      // 右側は値ラベル用の余白(M.right)まで使えるが、左側は会社名の列に入れない
-      const fits = grows > 0
-        ? tip + 8 + width <= W - 4
-        : tip - 8 - width >= M.left;
-      const anchor = fits ? (grows > 0 ? "start" : "end") : (grows > 0 ? "end" : "start");
-      const px = fits ? tip + grows * 8 : x(0) - grows * 8;
+      // 先端の外側に置く。はみ出す場合は、その行では空いている0の反対側へ逃がす
+      const fits = grows > 0 ? tip + 8 + width <= W - 4 : tip - 8 - width >= M.left;
       const vl = svgEl("text", {
-        class: "value-label", x: px, y: yTop + BAR_H - 1, "text-anchor": anchor,
+        class: "value-label",
+        x: fits ? tip + grows * 8 : x(0) - grows * 8,
+        y: yTop + BAR_H - 1,
+        "text-anchor": fits ? (grows > 0 ? "start" : "end") : (grows > 0 ? "end" : "start"),
       });
       vl.textContent = text;
       g.append(vl);
@@ -306,19 +610,19 @@ function renderOverviewChart() {
     hit.addEventListener("mousemove", (ev) => {
       tooltip.hidden = false;
       tooltip.innerHTML = "";
-      const c = state.companies[item.index];
+      const d = state.byKey.get(keyOf(item.name, state.period));
       tooltip.append(
         el("div", { class: "tt-title", text: item.name }),
-        el("div", { class: "tt-value", text: `${measure.label}: ${fmtSigned(item.value)}` }),
-        el("div", { class: "tt-value", text: `期末現金残高: ${fmt(c.cf.endingCash)}` }),
+        el("div", { class: "tt-value", text: `${measure.label}: ${fmtBy(measure.kind, item.value)}` }),
+        el("div", { class: "tt-value", text: `営業CF: ${fmt(d.metrics.operatingCF)}` }),
         el("div", { class: "tt-hint", text: "クリックで明細を表示" }),
       );
       positionTooltip(tooltip, svg, ev);
     });
     hit.addEventListener("mouseleave", () => { tooltip.hidden = true; });
-    hit.addEventListener("click", () => selectCompany(item.index));
+    hit.addEventListener("click", () => selectCompany(item.name));
     hit.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectCompany(item.index); }
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectCompany(item.name); }
     });
 
     g.append(hit);
@@ -326,41 +630,23 @@ function renderOverviewChart() {
   });
 }
 
-/* =========================================================
- * 全社比較テーブル
- * ======================================================= */
-
-const OVERVIEW_COLS = [
-  { key: "name", label: "会社名", type: "text" },
-  { key: "operatingCF", label: "営業CF" },
-  { key: "investingCF", label: "投資CF" },
-  { key: "financingCF", label: "財務CF" },
-  { key: "freeCF", label: "フリーCF" },
-  { key: "netChange", label: "増減額" },
-  { key: "beginningCash", label: "期首残高" },
-  { key: "endingCash", label: "期末残高" },
-  { key: "ok", label: "整合", type: "check" },
-];
-
 function renderOverviewTable() {
   const table = document.getElementById("overview-table");
   table.innerHTML = "";
-
-  const rows = state.companies.map((c, index) => ({
-    index, name: c.name, ok: c.checks.every((k) => k.ok), ...c.cf,
-  }));
+  const rows = overviewRows();
 
   const { key, dir } = state.sort;
   if (key) {
     rows.sort((a, b) => {
       if (key === "name") return a.name.localeCompare(b.name, "ja") * dir;
       if (key === "ok") return ((a.ok ? 1 : 0) - (b.ok ? 1 : 0)) * dir;
-      return (a[key] - b[key]) * dir;
+      const av = a[key], bv = b[key];
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
+      return (av - bv) * dir;
     });
   }
 
-  // --- 見出し ---
-  const thead = el("thead");
   const htr = el("tr");
   for (const col of OVERVIEW_COLS) {
     const th = el("th", {
@@ -371,7 +657,9 @@ function renderOverviewTable() {
     th.append(col.label);
     if (key === col.key) th.append(el("span", { class: "sort-arrow", text: dir === 1 ? " ▲" : " ▼" }));
     const sort = () => {
-      state.sort = key === col.key ? { key: col.key, dir: -dir } : { key: col.key, dir: col.type === "text" ? 1 : -1 };
+      state.sort = key === col.key
+        ? { key: col.key, dir: -dir }
+        : { key: col.key, dir: col.type === "text" ? 1 : -1 };
       renderOverviewTable();
     };
     th.addEventListener("click", sort);
@@ -380,88 +668,44 @@ function renderOverviewTable() {
     });
     htr.append(th);
   }
-  thead.append(htr);
-  table.append(thead);
+  table.append(el("thead", {}, htr));
 
-  // --- 明細 ---
   const tbody = el("tbody");
   for (const r of rows) {
     const tr = el("tr", {
-      class: r.index === state.selected ? "is-selected" : "",
-      role: "button", tabindex: "0",
-      "aria-label": `${r.name}の明細を表示`,
+      class: r.name === state.company ? "is-selected" : "",
+      role: "button", tabindex: "0", "aria-label": `${r.name}の明細を表示`,
     });
     tr.append(el("td", { class: "label", text: r.name }));
     for (const col of OVERVIEW_COLS.slice(1, -1)) {
-      tr.append(el("td", { class: "num", text: fmt(r[col.key]) }));
+      tr.append(el("td", { class: "num", text: fmtBy(col.kind, r[col.key]) }));
     }
-    const okTd = el("td", { class: `num check-col ${r.ok ? "ok" : "ng"}` });
-    okTd.textContent = r.ok ? "✓" : "!";
+    const okTd = el("td", { class: `num check-col ${r.ok ? "ok" : "ng"}`, text: r.ok ? "✓" : "!" });
     okTd.setAttribute("title", r.ok ? "整合性チェックはすべてOK" : "整合しない項目があります");
     tr.append(okTd);
-
-    tr.addEventListener("click", () => selectCompany(r.index));
+    tr.addEventListener("click", () => selectCompany(r.name));
     tr.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectCompany(r.index); }
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectCompany(r.name); }
     });
     tbody.append(tr);
   }
   table.append(tbody);
 
-  // --- 合計 ---
-  const tfoot = el("tfoot");
+  // 合計行(比率は合算できないので空欄にする)
   const ftr = el("tr");
   ftr.append(el("td", { class: "label", text: `合計(${rows.length}社)` }));
   for (const col of OVERVIEW_COLS.slice(1, -1)) {
-    ftr.append(el("td", { class: "num", text: fmt(rows.reduce((s, r) => s + r[col.key], 0)) }));
+    if (col.kind === "pct") { ftr.append(el("td", { class: "num muted", text: "—" })); continue; }
+    const vals = rows.map((r) => r[col.key]).filter((v) => v !== null && v !== undefined);
+    ftr.append(el("td", { class: "num", text: vals.length ? fmt(vals.reduce((s, v) => s + v, 0)) : "—" }));
   }
-  const ngCount = rows.filter((r) => !r.ok).length;
-  ftr.append(el("td", { class: `num check-col ${ngCount ? "ng" : "ok"}`, text: ngCount ? `${ngCount}社` : "✓" }));
-  tfoot.append(ftr);
-  table.append(tfoot);
+  const ng = rows.filter((r) => !r.ok).length;
+  ftr.append(el("td", { class: `num check-col ${ng ? "ng" : "ok"}`, text: ng ? `${ng}社` : "✓" }));
+  table.append(el("tfoot", {}, ftr));
 }
 
 /* =========================================================
- * 読み込み結果テーブル(選択中の1社)
- * ======================================================= */
-
-function renderLoadedTables(data) {
-  const bsBody = document.getElementById("bs-body");
-  bsBody.innerHTML = "";
-  for (const f of DISPLAY_FIELDS.bs) {
-    const label = el("td", { class: "label" });
-    label.append(el("span", { class: "group-tag", text: f.group }), f.label);
-    bsBody.append(el("tr", {},
-      label,
-      el("td", { class: "num", text: fmt(data.bs.prev[f.key]) }),
-      el("td", { class: "num", text: fmt(data.bs.curr[f.key]) }),
-    ));
-  }
-
-  for (const section of ["pl", "sup", "ss"]) {
-    const body = document.getElementById(`${section}-body`);
-    body.innerHTML = "";
-    for (const f of DISPLAY_FIELDS[section]) {
-      body.append(el("tr", {},
-        el("td", { class: "label", text: f.label }),
-        el("td", { class: "num", text: fmt(data[section][f.key]) }),
-      ));
-    }
-  }
-
-  const assets = (p) => data.bs[p].cash + data.bs[p].receivables + data.bs[p].inventory +
-    data.bs[p].otherCA + data.bs[p].tangible + data.bs[p].investments;
-  const liabEq = (p) => data.bs[p].payables + data.bs[p].shortLoans + data.bs[p].otherCL +
-    data.bs[p].longLoans + data.bs[p].netAssets;
-  document.getElementById("bs-assets-prev").textContent = fmt(assets("prev"));
-  document.getElementById("bs-assets-curr").textContent = fmt(assets("curr"));
-  document.getElementById("bs-liabeq-prev").textContent = fmt(liabEq("prev"));
-  document.getElementById("bs-liabeq-curr").textContent = fmt(liabEq("curr"));
-  document.getElementById("pl-netincome").textContent = fmt(data.pl.pretaxIncome - data.pl.incomeTaxes);
-}
-
-/* =========================================================
- * CF計算書
+ * CF計算書とウォーターフォール
  * ======================================================= */
 
 function renderStatement(cf) {
@@ -476,8 +720,6 @@ function renderStatement(cf) {
     tr.append(td);
     table.append(tr);
   };
-
-  // 金額ゼロの明細行は省略(構造行は常に表示)
   const items = (list) => list.filter((i) => i.always || Math.abs(i.value) >= 0.005);
 
   row("head", "Ⅰ 営業活動によるキャッシュ・フロー", null);
@@ -499,10 +741,6 @@ function renderStatement(cf) {
   row("grand", "Ⅵ 現金及び現金同等物の期末残高", cf.endingCash);
 }
 
-/* =========================================================
- * ウォーターフォールチャート(選択中の1社)
- * ======================================================= */
-
 function renderWaterfall(cf) {
   const svg = document.getElementById("waterfall");
   const tooltip = document.getElementById("wf-tooltip");
@@ -516,16 +754,10 @@ function renderWaterfall(cf) {
     { label: "期末残高", type: "total", from: 0, to: cf.endingCash, value: cf.endingCash },
   ];
 
-  // 累積を計算して各バーの上端・下端を決める
   let cum = 0;
   for (const s of steps) {
-    if (s.type === "total") {
-      cum = s.to;
-    } else {
-      s.from = cum;
-      s.to = cum + s.value;
-      cum = s.to;
-    }
+    if (s.type === "total") cum = s.to;
+    else { s.from = cum; s.to = cum + s.value; cum = s.to; }
   }
 
   const W = 720, H = 340;
@@ -541,7 +773,6 @@ function renderWaterfall(cf) {
   const ticks = niceTicks(lo - (lo < 0 ? pad : 0), hi + pad);
   lo = Math.min(lo, ticks[0]);
   hi = Math.max(hi, ticks[ticks.length - 1]);
-
   const y = (v) => M.top + plotH - ((v - lo) / (hi - lo)) * plotH;
 
   for (const t of ticks) {
@@ -550,49 +781,38 @@ function renderWaterfall(cf) {
       x1: M.left, x2: M.left + plotW, y1: y(t), y2: y(t),
     }));
     const lbl = svgEl("text", { class: "tick-label", x: M.left - 8, y: y(t) + 4, "text-anchor": "end" });
-    lbl.textContent = t.toLocaleString("ja-JP");
+    lbl.textContent = fmtSigned(t).replace("+", "");
     svg.append(lbl);
   }
 
   const band = plotW / steps.length;
   const BAR_W = Math.min(24, band * 0.5);
-  const R = 4;
-
-  // 角丸をデータ側の端(上端 or 下端)にだけ付けたバーのパス
-  function barPath(x, top, bottom, roundTop) {
-    const w = BAR_W;
-    const h = Math.max(bottom - top, 0.5);
-    const r = Math.min(R, h / 2, w / 2);
-    if (roundTop) {
-      return `M${x},${bottom} L${x},${top + r} Q${x},${top} ${x + r},${top} L${x + w - r},${top} Q${x + w},${top} ${x + w},${top + r} L${x + w},${bottom} Z`;
-    }
-    return `M${x},${top} L${x + w},${top} L${x + w},${bottom - r} Q${x + w},${bottom} ${x + w - r},${bottom} L${x + r},${bottom} Q${x},${bottom} ${x},${bottom - r} Z`;
-  }
 
   steps.forEach((s, i) => {
     const cx = M.left + band * i + band / 2;
-    const x0 = cx - BAR_W / 2;
     const topY = y(Math.max(s.from, s.to));
     const botY = y(Math.min(s.from, s.to));
-
     const g = svgEl("g", { class: "band" });
 
     const cls = s.type === "total" ? "bar-total" : s.value >= 0 ? "bar-pos" : "bar-neg";
     const roundTop = s.type === "total" ? s.to >= 0 : s.value >= 0;
-    g.append(svgEl("path", { class: `bar ${cls}`, d: barPath(x0, topY, botY, roundTop) }));
+    // データ端(増加・残高は上端、減少は下端)だけ角を丸める
+    const yBase = roundTop ? botY : topY;
+    const yValue = roundTop ? topY : botY;
+    g.append(svgEl("path", { class: `bar ${cls}`, d: vBarPath(cx - BAR_W / 2, BAR_W, yBase, yValue) }));
 
     if (i > 0) {
       const prev = steps[i - 1];
       const prevCx = M.left + band * (i - 1) + band / 2;
       g.append(svgEl("line", {
         class: "connector",
-        x1: prevCx + BAR_W / 2, x2: cx - BAR_W / 2,
-        y1: y(prev.to), y2: y(prev.to),
+        x1: prevCx + BAR_W / 2, x2: cx - BAR_W / 2, y1: y(prev.to), y2: y(prev.to),
       }));
     }
 
-    const labelY = roundTop ? topY - 6 : botY + 14;
-    const vl = svgEl("text", { class: "value-label", x: cx, y: labelY, "text-anchor": "middle" });
+    const vl = svgEl("text", {
+      class: "value-label", x: cx, y: roundTop ? topY - 6 : botY + 14, "text-anchor": "middle",
+    });
     vl.textContent = s.type === "total" ? fmt(s.value) : fmtSigned(s.value);
     g.append(vl);
 
@@ -600,9 +820,7 @@ function renderWaterfall(cf) {
     cl.textContent = s.label;
     g.append(cl);
 
-    const hit = svgEl("rect", {
-      class: "hit", x: M.left + band * i, y: M.top, width: band, height: plotH,
-    });
+    const hit = svgEl("rect", { class: "hit", x: M.left + band * i, y: M.top, width: band, height: plotH });
     hit.addEventListener("mousemove", (ev) => {
       tooltip.hidden = false;
       tooltip.innerHTML = "";
@@ -614,35 +832,28 @@ function renderWaterfall(cf) {
       positionTooltip(tooltip, svg, ev);
     });
     hit.addEventListener("mouseleave", () => { tooltip.hidden = true; });
-
     g.append(hit);
     svg.append(g);
   });
 }
 
-/* =========================================================
- * チェック結果・メッセージ
- * ======================================================= */
-
 function renderChecks(checks) {
   const wrap = document.getElementById("checks");
   wrap.innerHTML = "";
-  wrap.hidden = false;
+  wrap.hidden = checks.length === 0;
   for (const c of checks) {
-    const div = el("div", { class: `check ${c.ok ? "ok" : "ng"}` });
-    div.append(
+    wrap.append(el("div", { class: `check ${c.ok ? "ok" : "ng"}` },
       el("span", { class: "icon", text: c.ok ? "✓" : "!" }),
       el("span", { text: c.title }),
       el("span", { class: "detail", text: c.detail }),
-    );
-    wrap.append(div);
+    ));
   }
 }
 
 function renderMessages(errors, warnings) {
   const wrap = document.getElementById("messages");
   wrap.innerHTML = "";
-  const MAX = 12; // 何十社分もの警告で画面が埋まらないようにする
+  const MAX = 12;
   const all = [
     ...errors.map((t) => ({ kind: "error", text: t })),
     ...warnings.map((t) => ({ kind: "warn", text: t })),
@@ -666,52 +877,70 @@ function renderMessages(errors, warnings) {
  * 画面の組み立て
  * ======================================================= */
 
-function selectCompany(index) {
-  state.selected = index;
-  renderDetail();
-  renderOverviewTable();
-  renderOverviewChart();
-  document.getElementById("company-select").value = String(index);
-  document.getElementById("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+function selectCompany(name) {
+  if (!state.byKey.has(keyOf(name, state.period))) return;
+  state.company = name;
+  document.getElementById("company-select").value = name;
+  renderAll();
+  document.getElementById("summary").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function renderDetail() {
-  const company = state.companies[state.selected];
-  if (!company) return;
+function renderSelectors() {
+  const companySelect = document.getElementById("company-select");
+  companySelect.innerHTML = "";
+  for (const name of state.companies) {
+    companySelect.append(el("option", { value: name, text: name }));
+  }
+  companySelect.value = state.company;
+
+  const periodSelect = document.getElementById("period-select");
+  periodSelect.innerHTML = "";
+  // 新しい四半期を上に出す
+  for (const p of [...state.periods].reverse()) {
+    periodSelect.append(el("option", { value: p.label, text: p.label }));
+  }
+  periodSelect.value = state.period;
+
+  document.getElementById("company-field").hidden = state.companies.length <= 1;
+  document.getElementById("period-field").hidden = state.periods.length <= 1;
+  document.getElementById("selector-bar").hidden =
+    state.companies.length <= 1 && state.periods.length <= 1;
+}
+
+function renderAll() {
+  const dataset = currentDataset();
   const multi = state.companies.length > 1;
 
-  document.getElementById("detail-title").textContent =
-    multi ? `明細:${company.name}` : "読み込み結果";
-  document.getElementById("statement-company").textContent = company.name;
-
-  renderLoadedTables(company.data);
-  renderChecks(company.checks);
-  renderStatement(company.cf);
-  renderWaterfall(company.cf);
-}
-
-function renderCompanySelect() {
-  const select = document.getElementById("company-select");
-  select.innerHTML = "";
-  state.companies.forEach((c, i) => {
-    select.append(el("option", { value: String(i), text: c.name }));
-  });
-  select.value = String(state.selected);
-}
-
-function render() {
-  const multi = state.companies.length > 1;
-
+  document.getElementById("summary").hidden = !dataset;
+  document.getElementById("cf-section").hidden = !dataset;
   document.getElementById("overview").hidden = !multi;
-  document.getElementById("company-bar").hidden = !multi;
-  document.getElementById("detail").hidden = false;
-  document.getElementById("results").hidden = false;
   document.getElementById("empty-state").hidden = true;
   document.getElementById("btn-clear").hidden = false;
   document.getElementById("btn-export").hidden = false;
 
+  if (!dataset) {
+    renderChecks([]);
+    document.getElementById("trend").hidden = true;
+    return;
+  }
+
+  renderMetrics();
+  renderTrend();
+  renderChecks(dataset.checks);
+
+  document.getElementById("statement-subject").textContent =
+    `${dataset.company} / ${dataset.period.label}`;
+  const hasCF = !!dataset.cf;
+  document.getElementById("cf-body").hidden = !hasCF;
+  document.getElementById("cf-unavailable").hidden = hasCF;
+  if (hasCF) {
+    renderStatement(dataset.cf);
+    renderWaterfall(dataset.cf);
+  }
+
   if (multi) {
-    document.getElementById("overview-count").textContent = `${state.companies.length}社`;
+    document.getElementById("overview-subject").textContent = state.period;
+    document.getElementById("overview-count").textContent = `${overviewRows().length}社`;
     const picker = document.getElementById("measure-select");
     if (!picker.options.length) {
       for (const m of MEASURES) picker.append(el("option", { value: m.key, text: m.label }));
@@ -721,13 +950,11 @@ function render() {
       MEASURES.find((m) => m.key === state.measure).label;
     renderOverviewChart();
     renderOverviewTable();
-    renderCompanySelect();
   }
-  renderDetail();
 }
 
 function showEmptyState() {
-  for (const id of ["overview", "company-bar", "detail", "results", "checks"]) {
+  for (const id of ["selector-bar", "summary", "trend", "cf-section", "overview", "checks"]) {
     document.getElementById(id).hidden = true;
   }
   document.getElementById("empty-state").hidden = false;
@@ -739,15 +966,65 @@ function showEmptyState() {
  * 読み込み
  * ======================================================= */
 
-/** ファイル名から拡張子を除いたもの(会社名の列がない場合の会社名) */
 function baseName(filename) {
   return filename.replace(/\.[^.]+$/, "") || filename;
 }
 
-/**
- * 複数のCSV({name, text})をまとめて取り込む。
- * 同じ会社名が複数回出てきた場合は、同一科目の行と同じように合算する。
- */
+/** 会社×四半期のデータセットを組み立て、CF・チェック・指標を計算する */
+function buildState(datasets, warnings) {
+  state.datasets = datasets;
+  state.byKey = new Map();
+  state.byCompany = new Map();
+
+  const companies = [];
+  const periods = new Map();
+  for (const d of datasets) {
+    if (!state.byCompany.has(d.company)) { state.byCompany.set(d.company, []); companies.push(d.company); }
+    state.byCompany.get(d.company).push(d);
+    state.byKey.set(keyOf(d.company, d.period.label), d);
+    periods.set(d.period.label, d.period);
+  }
+  state.companies = companies;
+  state.periods = [...periods.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  let derived = 0, noPrev = 0;
+  for (const [, series] of state.byCompany) {
+    series.sort((a, b) => a.period.sortKey.localeCompare(b.period.sortKey));
+
+    series.forEach((d, i) => {
+      // 前期末が未入力なら、直前の四半期の当期末を期首として引き継ぐ
+      if (!d.hasPrev && i > 0) {
+        d.data.bs.prev = { ...series[i - 1].data.bs.curr };
+        d.derivedPrev = true;
+        derived++;
+      }
+      d.cfAvailable = d.hasPrev || !!d.derivedPrev;
+      d.cf = d.cfAvailable ? computeCF(d.data) : null;
+      d.checks = computeChecks(d.data, d.cf);
+      d.metrics = computeBaseMetrics(d.data, d.cf);
+      if (!d.cfAvailable) noPrev++;
+    });
+    finalizeROIC(series);
+  }
+
+  if (derived > 0) {
+    warnings.push(`${derived}件の四半期は、前の四半期の期末残高を期首として計算しました。`);
+  }
+  if (noPrev > 0) {
+    warnings.push(`${noPrev}件の四半期は期首のBSがないため、CF計算書を作成できません(前の四半期を追加するか「前期末」列を入力してください)。`);
+  }
+
+  // 既定は最新の四半期・最初の会社
+  const latest = state.periods[state.periods.length - 1];
+  state.period = latest ? latest.label : "";
+  state.company = state.companies[0] || "";
+  if (!state.byKey.has(keyOf(state.company, state.period))) {
+    const fallback = state.companies.find((c) => state.byKey.has(keyOf(c, state.period)));
+    if (fallback) state.company = fallback;
+  }
+  state.sort = { key: null, dir: 1 };
+}
+
 function applySources(sources) {
   const errors = [], warnings = [];
   const merged = new Map();
@@ -760,17 +1037,19 @@ function applySources(sources) {
     warnings.push(...result.warnings.map((w) => prefix + w));
     matched += result.matched;
 
-    for (const { name, data } of result.companies) {
-      if (!merged.has(name)) { merged.set(name, data); continue; }
-      warnings.push(`「${name}」のデータが複数の箇所にあります。合算して1社として扱います。`);
-      const acc = merged.get(name);
-      for (const key of Object.keys(acc.bs.prev)) {
-        acc.bs.prev[key] += data.bs.prev[key];
-        acc.bs.curr[key] += data.bs.curr[key];
+    for (const ds of result.datasets) {
+      const key = keyOf(ds.company, ds.period.label);
+      if (!merged.has(key)) { merged.set(key, ds); continue; }
+      warnings.push(`「${ds.company} / ${ds.period.label}」のデータが複数の箇所にあります。合算して扱います。`);
+      const acc = merged.get(key);
+      for (const k of Object.keys(acc.data.bs.prev)) {
+        acc.data.bs.prev[k] += ds.data.bs.prev[k];
+        acc.data.bs.curr[k] += ds.data.bs.curr[k];
       }
       for (const section of ["pl", "sup", "ss"]) {
-        for (const key of Object.keys(acc[section])) acc[section][key] += data[section][key];
+        for (const k of Object.keys(acc.data[section])) acc.data[section][k] += ds.data[section][k];
       }
+      acc.hasPrev = acc.hasPrev || ds.hasPrev;
     }
   }
 
@@ -783,24 +1062,21 @@ function applySources(sources) {
     status.className = "file-status ng";
     if (errors.length === 0) errors.push("読み込めるデータがありませんでした。");
     renderMessages(errors, warnings);
-    state.companies = [];
+    state.datasets = [];
     showEmptyState();
     document.getElementById("btn-clear").hidden = false;
     return;
   }
 
-  state.companies = [...merged].map(([name, data]) => {
-    const cf = computeCF(data);
-    return { name, data, cf, checks: computeChecks(data, cf) };
-  });
-  state.selected = 0;
-  state.sort = { key: null, dir: 1 };
+  buildState([...merged.values()], warnings);
   state.sources = sources;
 
-  status.textContent = `${label} を読み込みました(${state.companies.length}社 / ${matched}件の科目を認識)`;
+  const periodText = state.periods.length > 1 ? ` / ${state.periods.length}四半期` : "";
+  status.textContent = `${label} を読み込みました(${state.companies.length}社${periodText} / ${matched}件の科目を認識)`;
   status.className = "file-status ok";
   renderMessages(errors, warnings);
-  render();
+  renderSelectors();
+  renderAll();
 
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sources));
@@ -810,7 +1086,6 @@ function applySources(sources) {
 async function handleFiles(fileList) {
   const files = [...fileList];
   if (files.length === 0) return;
-
   const total = files.reduce((s, f) => s + f.size, 0);
   if (total > 20 * 1024 * 1024) {
     renderMessages(["ファイルサイズの合計が大きすぎます(20MBまで)。"], []);
@@ -827,7 +1102,7 @@ async function handleFiles(fileList) {
 }
 
 function clearAll() {
-  state.companies = [];
+  state.datasets = [];
   state.sources = [];
   document.getElementById("file-input").value = "";
   document.getElementById("file-status").hidden = true;
@@ -862,27 +1137,36 @@ document.addEventListener("DOMContentLoaded", () => {
     dropzone.classList.remove("is-over");
     handleFiles(ev.dataTransfer.files);
   });
-  // ページ外へのドロップでブラウザがファイルを開いてしまうのを防ぐ
   for (const type of ["dragover", "drop"]) {
     document.addEventListener(type, (ev) => {
       if (!dropzone.contains(ev.target)) ev.preventDefault();
     });
   }
 
-  document.getElementById("btn-sample")
-    .addEventListener("click", () => applySources([{ name: "sample.csv", text: SAMPLE_CSV }]));
   document.getElementById("btn-sample-27")
     .addEventListener("click", () => applySources([{ name: "sample-27.csv", text: SAMPLE_27_CSV }]));
+  document.getElementById("btn-sample")
+    .addEventListener("click", () => applySources([{ name: "sample.csv", text: SAMPLE_CSV }]));
   document.getElementById("btn-template")
     .addEventListener("click", () => downloadText("cf-template.csv", buildTemplateCSV()));
   document.getElementById("btn-export")
     .addEventListener("click", () => {
-      if (state.companies.length) downloadText("cf-input.csv", buildTemplateCSV(state.companies));
+      if (state.datasets.length) downloadText("cf-input.csv", buildTemplateCSV(state.datasets));
     });
   document.getElementById("btn-clear").addEventListener("click", clearAll);
 
   document.getElementById("company-select").addEventListener("change", (ev) => {
-    selectCompany(Number(ev.target.value));
+    state.company = ev.target.value;
+    renderAll();
+  });
+  document.getElementById("period-select").addEventListener("change", (ev) => {
+    state.period = ev.target.value;
+    // 選んだ四半期にその会社のデータがなければ、ある会社へ寄せる
+    if (!state.byKey.has(keyOf(state.company, state.period))) {
+      const fallback = state.companies.find((c) => state.byKey.has(keyOf(c, state.period)));
+      if (fallback) { state.company = fallback; document.getElementById("company-select").value = fallback; }
+    }
+    renderAll();
   });
   document.getElementById("measure-select").addEventListener("change", (ev) => {
     state.measure = ev.target.value;
@@ -890,8 +1174,13 @@ document.addEventListener("DOMContentLoaded", () => {
       MEASURES.find((m) => m.key === state.measure).label;
     renderOverviewChart();
   });
+  for (const radio of document.querySelectorAll('input[name="trend-mode"]')) {
+    radio.addEventListener("change", (ev) => {
+      state.trendMode = ev.target.value;
+      renderTrend();
+    });
+  }
 
-  // 前回読み込んだCSVを復元
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
     if (Array.isArray(saved) && saved.length) applySources(saved);

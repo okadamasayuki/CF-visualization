@@ -10,7 +10,7 @@
 <body>
 <header class="site-header">
   <h1>キャッシュ・フロー計算書 ジェネレーター</h1>
-  <p class="subtitle">BS・PL・SSをまとめたCSVをアップロードすると、間接法によるキャッシュ・フロー計算書を自動作成して表示します。複数社をまとめて読み込み、比較することもできます。</p>
+  <p class="subtitle">BS・PL・SSをまとめたCSVをアップロードすると、会社と四半期ごとにキャッシュ・フロー計算書と財務指標を自動作成します。</p>
 </header>
 
 <main>
@@ -25,12 +25,12 @@
         </svg>
       </span>
       <span class="dz-title">CSVファイルをドラッグ&amp;ドロップ、またはクリックして選択</span>
-      <span class="dz-note">1ファイルに複数社をまとめても、1社1ファイルで複数選択してもOK / UTF-8・Shift_JIS 対応</span>
+      <span class="dz-note">複数社・複数四半期を1ファイルにまとめてもOK / 複数ファイルの同時選択も可 / UTF-8・Shift_JIS 対応</span>
     </label>
 
     <div class="toolbar">
-      <button id="btn-sample-27" type="button" class="btn btn-secondary">サンプル27社を読み込む</button>
-      <button id="btn-sample" type="button" class="btn">サンプル1社を読み込む</button>
+      <button id="btn-sample-27" type="button" class="btn btn-secondary">サンプル(27社×10四半期)</button>
+      <button id="btn-sample" type="button" class="btn">サンプル(1社)</button>
       <button id="btn-template" type="button" class="btn">テンプレートCSVをダウンロード</button>
       <button id="btn-export" type="button" class="btn" hidden>読み込んだ内容をCSVで保存</button>
       <button id="btn-clear" type="button" class="btn btn-ghost" hidden>クリア</button>
@@ -41,153 +41,164 @@
 
     <details class="format-help">
       <summary>CSVの書式について</summary>
-      <p>1行目に見出し、2行目以降に科目と金額を並べた縦持ち形式です。<code>会社名</code>列を入れると複数社を1ファイルにまとめられます(1社だけなら省略可)。<code>区分</code>列は任意で、読み飛ばします。BSは前期末・当期末の2列、PL・SS・補足は当期末の列だけを使います。</p>
-<pre><code>会社名,区分,科目,前期末,当期末
-アルファ工業,BS,現金及び預金,12000,7900
-アルファ工業,BS,売上債権,18000,21000
-アルファ工業,PL,税引前当期純利益,,9000
-ブライト電機,BS,現金及び預金,8000,9500</code></pre>
+      <p>1行目に見出し、2行目以降に科目と金額を並べた縦持ち形式です。<code>会社名</code>と<code>四半期</code>の列を入れると、複数社・複数四半期を1ファイルにまとめられます(どちらも任意)。</p>
+<pre><code>会社名,四半期,区分,科目,前期末,当期末
+アルファ工業,2025Q1,BS,現金及び預金,11700,15900
+アルファ工業,2025Q1,BS,預け金,4000,4600
+アルファ工業,2025Q1,PL,売上高,,52000
+アルファ工業,2025Q2,BS,現金及び預金,,17200
+ブライト電機,2025Q1,BS,現金及び預金,8000,9500</code></pre>
       <ul>
+        <li><strong>2四半期目以降は<code>前期末</code>を省略できます。</strong>直前の四半期の期末残高を期首として自動で引き継ぎます。</li>
+        <li><code>四半期</code>は <code>2025Q1</code> / <code>FY2025Q1</code> / <code>2025年度第1四半期</code> / <code>2025年1Q</code> / <code>2025-03</code> などの表記を解釈します。</li>
         <li>金額は <code>1,234</code> / <code>¥1,234</code> / <code>△1,234</code> / <code>(1,234)</code> / <code>-1,234</code> のいずれの表記でも読み取れます。</li>
-        <li>科目名は別名に対応しています(例:<code>売掛金</code>・<code>受取手形</code> → 売上債権)。同じ会社の同じ科目に複数行あれば合算します。</li>
-        <li><code>会社名</code>列を空欄にした行は、直前の行の会社名を引き継ぎます。</li>
-        <li><code>会社名</code>列がないファイルは、ファイル名を会社名として扱います。1社1ファイルで複数まとめて選択できます。</li>
+        <li>科目名は別名に対応しています(例:<code>売掛金</code>・<code>受取手形</code> → 売上債権)。同じ会社・同じ四半期の同じ科目に複数行あれば合算します。</li>
+        <li><code>会社名</code>・<code>四半期</code>を空欄にした行は、直前の行の値を引き継ぎます。</li>
+        <li><code>会社名</code>列がないファイルは、ファイル名を会社名として扱います。</li>
         <li>SSと補足情報の金額は、支出・減少項目もすべて正の値で入力してください。</li>
-        <li>認識できない科目の行は読み飛ばし、下に一覧で表示します。</li>
       </ul>
     </details>
   </section>
 
-  <!-- ===== 全社比較(2社以上のとき) ===== -->
-  <section id="overview" hidden>
-    <h2 class="section-title">全社比較 <span id="overview-count" class="count-badge"></span></h2>
-
-    <div class="card chart-card">
-      <div class="chart-head">
-        <h3><span id="chart-measure-label">営業CF</span>の比較</h3>
-        <label class="measure-picker">指標
-          <select id="measure-select"></select>
-        </label>
-      </div>
-      <div class="legend">
-        <span class="legend-item"><span class="swatch swatch-pos"></span>プラス</span>
-        <span class="legend-item"><span class="swatch swatch-neg"></span>マイナス</span>
-        <span class="legend-hint">バーをクリックすると明細を表示します</span>
-      </div>
-      <div class="chart-wrap">
-        <svg id="overview-chart" role="img" aria-label="会社別のキャッシュ・フロー比較(降順の横棒グラフ)"></svg>
-        <div id="ov-tooltip" class="tooltip" hidden></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>会社別サマリー</h3>
-      <p class="table-hint">見出しをクリックすると並べ替え、行をクリックするとその会社の明細を表示します。</p>
-      <div class="table-scroll">
-        <table class="data-table overview-table" id="overview-table"></table>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===== 会社の切り替え ===== -->
-  <section id="company-bar" class="company-bar" hidden>
-    <label>表示中の会社
+  <!-- ===== 会社・四半期の選択 ===== -->
+  <section id="selector-bar" class="selector-bar" hidden>
+    <label id="company-field" class="field">会社
       <select id="company-select"></select>
+    </label>
+    <label id="period-field" class="field">四半期
+      <select id="period-select"></select>
     </label>
   </section>
 
-  <!-- ===== 読み込み結果(選択中の1社) ===== -->
-  <section id="detail" hidden>
-    <h2 class="section-title" id="detail-title">読み込み結果</h2>
-    <div class="inputs">
-      <div class="card">
-        <h3>貸借対照表(BS)</h3>
-        <table class="data-table">
-          <thead>
-            <tr><th class="label-col">科目</th><th>前期末</th><th>当期末</th></tr>
-          </thead>
-          <tbody id="bs-body"></tbody>
-          <tfoot>
-            <tr class="total-row"><td>資産合計</td><td id="bs-assets-prev">0</td><td id="bs-assets-curr">0</td></tr>
-            <tr class="total-row"><td>負債・純資産合計</td><td id="bs-liabeq-prev">0</td><td id="bs-liabeq-curr">0</td></tr>
-          </tfoot>
-        </table>
+  <!-- ===== 選択中の会社・四半期のサマリー ===== -->
+  <section id="summary" hidden>
+    <h2 class="section-title">サマリー <span id="metrics-subject" class="count-badge"></span></h2>
+    <div class="card">
+      <div class="chart-head">
+        <h3>財務指標</h3>
+        <span id="metrics-yoy-label" class="table-hint"></span>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table metrics-table" id="metrics-table"></table>
+      </div>
+      <p id="metrics-estimate-note" class="hint" hidden>
+        ※ 営業利益がCSVにないため「税引前当期純利益 + 支払利息 − 受取利息」で推計しています。EBITDAとROICもこの推計値に基づきます。
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== 預け金・借入金の推移 ===== -->
+  <section id="trend" hidden>
+    <div class="card chart-card">
+      <div class="chart-head">
+        <h3>預け金・借入金の推移 <span id="trend-count" class="count-badge"></span></h3>
+        <div class="mode-toggle" role="radiogroup" aria-label="表示する値">
+          <label><input type="radio" name="trend-mode" value="balance" checked> 残高</label>
+          <label><input type="radio" name="trend-mode" value="delta"> 前四半期差</label>
+        </div>
+      </div>
+      <div class="legend">
+        <span class="legend-item"><span class="swatch series-s1"></span>預け金</span>
+        <span class="legend-item"><span class="swatch series-s2"></span>借入金(有利子負債)</span>
+      </div>
+      <div class="chart-wrap">
+        <svg id="trend-chart" role="img" aria-label="選択中の会社の預け金と借入金の四半期推移"></svg>
+        <div id="tr-tooltip" class="tooltip" hidden></div>
+      </div>
+      <p id="trend-empty" class="hint" hidden>推移を描くには、同じ会社で2四半期以上のデータが必要です。</p>
+    </div>
+  </section>
+
+  <!-- ===== CF計算書 ===== -->
+  <section id="cf-section" hidden>
+    <h2 class="section-title">キャッシュ・フロー計算書 <span id="statement-subject" class="count-badge"></span></h2>
+
+    <div id="cf-unavailable" class="empty-state" hidden>
+      <p>この四半期は期首のBSがないため、CF計算書を作成できません。</p>
+      <p class="empty-sub">前の四半期のデータを追加するか、CSVに「前期末」列を入力してください。</p>
+    </div>
+
+    <div id="cf-body">
+      <div class="card chart-card">
+        <h3>キャッシュ・フローの推移(ウォーターフォール)</h3>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch swatch-total"></span>残高</span>
+          <span class="legend-item"><span class="swatch swatch-pos"></span>増加</span>
+          <span class="legend-item"><span class="swatch swatch-neg"></span>減少</span>
+        </div>
+        <div class="chart-wrap">
+          <svg id="waterfall" role="img" aria-label="期首残高から営業・投資・財務活動によるキャッシュ・フローを経て期末残高に至るウォーターフォールチャート"></svg>
+          <div id="wf-tooltip" class="tooltip" hidden></div>
+        </div>
       </div>
 
       <div class="card">
-        <h3>損益計算書(PL)</h3>
-        <table class="data-table">
-          <thead>
-            <tr><th class="label-col">科目</th><th>当期</th></tr>
-          </thead>
-          <tbody id="pl-body"></tbody>
-          <tfoot>
-            <tr class="total-row"><td>当期純利益(自動計算)</td><td id="pl-netincome">0</td></tr>
-          </tfoot>
-        </table>
-
-        <h3 class="section-gap">補足情報</h3>
-        <table class="data-table"><tbody id="sup-body"></tbody></table>
-      </div>
-
-      <div class="card">
-        <h3>株主資本等変動計算書(SS)</h3>
-        <table class="data-table">
-          <thead>
-            <tr><th class="label-col">変動事由</th><th>当期</th></tr>
-          </thead>
-          <tbody id="ss-body"></tbody>
-        </table>
-        <p class="hint">※ 当期純利益はPLから自動で引き継がれます。</p>
+        <h3>キャッシュ・フロー計算書(間接法)</h3>
+        <table class="statement" id="cf-statement"></table>
+        <details class="assumptions">
+          <summary>計算上の前提(簡便法)</summary>
+          <ul>
+            <li>利息及び配当金の受取額・利息の支払額・法人税等の支払額は、経過勘定を考慮せずPLの発生額をそのまま用いています。</li>
+            <li>有形固定資産の取得による支出は「期末純額 − 期首純額 + 減価償却費 + 売却簿価」で逆算しています(売却簿価 = 売却収入 − 売却損益)。</li>
+            <li>短期借入金・長期借入金・投資その他の資産はBSの増減額(純額)で表示しています。</li>
+            <li>預け金は現金同等物に含めず、その増減を投資活動に表示しています。</li>
+            <li>現金及び現金同等物はBSの「現金及び預金」と一致するものとしています。</li>
+          </ul>
+        </details>
       </div>
     </div>
   </section>
 
   <section id="checks" class="checks" hidden></section>
 
-  <!-- ===== 出力 ===== -->
-  <section id="results" hidden>
+  <!-- ===== 全社比較(選択中の四半期) ===== -->
+  <section id="overview" hidden>
+    <h2 class="section-title">全社比較
+      <span id="overview-subject" class="count-badge"></span>
+      <span id="overview-count" class="count-badge"></span>
+    </h2>
+
     <div class="card chart-card">
-      <h2>キャッシュ・フローの推移(ウォーターフォール)</h2>
+      <div class="chart-head">
+        <h3><span id="chart-measure-label">営業CF</span>の比較</h3>
+        <label class="field">指標
+          <select id="measure-select"></select>
+        </label>
+      </div>
       <div class="legend">
-        <span class="legend-item"><span class="swatch swatch-total"></span>残高</span>
-        <span class="legend-item"><span class="swatch swatch-pos"></span>増加</span>
-        <span class="legend-item"><span class="swatch swatch-neg"></span>減少</span>
+        <span class="legend-item"><span class="swatch swatch-pos"></span>プラス</span>
+        <span class="legend-item"><span class="swatch swatch-neg"></span>マイナス</span>
+        <span class="legend-hint">バーをクリックすると、その会社のサマリーを表示します</span>
       </div>
       <div class="chart-wrap">
-        <svg id="waterfall" role="img" aria-label="期首残高から営業・投資・財務活動によるキャッシュ・フローを経て期末残高に至るウォーターフォールチャート"></svg>
-        <div id="wf-tooltip" class="tooltip" hidden></div>
+        <svg id="overview-chart" role="img" aria-label="会社別の指標比較(降順の横棒グラフ)"></svg>
+        <div id="ov-tooltip" class="tooltip" hidden></div>
       </div>
+      <p id="overview-missing" class="hint" hidden></p>
     </div>
 
     <div class="card">
-      <h2>キャッシュ・フロー計算書(間接法)</h2>
-      <p class="statement-meta"><span id="statement-company"></span> / 自 前期末翌日 至 当期末</p>
-      <table class="statement" id="cf-statement"></table>
-      <details class="assumptions">
-        <summary>計算上の前提(簡便法)</summary>
-        <ul>
-          <li>利息及び配当金の受取額・利息の支払額・法人税等の支払額は、経過勘定を考慮せずPLの発生額をそのまま用いています。</li>
-          <li>有形固定資産の取得による支出は「期末純額 − 期首純額 + 減価償却費 + 売却簿価」で逆算しています(売却簿価 = 売却収入 − 売却損益)。</li>
-          <li>短期借入金・長期借入金・投資その他の資産はBSの増減額(純額)で表示しています。</li>
-          <li>現金及び現金同等物はBSの「現金及び預金」と一致するものとしています。</li>
-        </ul>
-      </details>
+      <h3>会社別サマリー</h3>
+      <p class="table-hint">見出しをクリックすると並べ替え、行をクリックするとその会社のサマリーを表示します。</p>
+      <div class="table-scroll">
+        <table class="data-table overview-table" id="overview-table"></table>
+      </div>
     </div>
   </section>
 
   <section id="empty-state" class="empty-state">
-    <p>CSVファイルをアップロードすると、キャッシュ・フロー計算書とチャートがここに表示されます。</p>
-    <p class="empty-sub">まずは「サンプル27社を読み込む」で動作を確認できます。</p>
+    <p>CSVファイルをアップロードすると、財務指標とキャッシュ・フロー計算書がここに表示されます。</p>
+    <p class="empty-sub">まずは「サンプル(27社×10四半期)」で動作を確認できます。</p>
   </section>
 </main>
 
 <footer class="site-footer">
-  <p>CF-visualization — BS・PL・SSのCSVからキャッシュ・フロー計算書を自動生成する静的Webアプリ</p>
+  <p>CF-visualization — BS・PL・SSのCSVからキャッシュ・フロー計算書と財務指標を自動生成する静的Webアプリ</p>
 </footer>
 
 <script src="js/schema.js"></script>
 <script src="js/csv.js"></script>
+<script src="js/metrics.js"></script>
 <script src="js/samples.js"></script>
 <script src="js/app.js"></script>
 </body>

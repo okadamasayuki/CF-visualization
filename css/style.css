@@ -17,6 +17,7 @@
   --warn: #9a6400;
   --accent: #2a78d6;
   --accent-wash: rgba(42, 120, 214, 0.07);
+  --series-2: #eb6834;   /* 2系列目(借入金) */
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -37,10 +38,14 @@
     --warn: #fab219;
     --accent: #3987e5;
     --accent-wash: rgba(57, 135, 229, 0.12);
+    --series-2: #d95926;
   }
 }
 
 * { box-sizing: border-box; }
+
+/* クラス側の display 指定に負けないよう、hidden を最優先で効かせる */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -146,7 +151,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
   gap: 12px;
   flex-wrap: wrap;
 }
-.measure-picker, .company-bar label {
+.field {
   font-size: 12px;
   color: var(--text-muted);
   display: inline-flex;
@@ -165,16 +170,61 @@ select {
 }
 select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
-.company-bar {
+.selector-bar {
   position: sticky;
   top: 0;
   z-index: 5;
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
   margin: 20px 0 0;
   padding: 10px 14px;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 10px;
 }
+
+/* ---- 系列の色(預け金 / 借入金) ---- */
+.series-s1 { --series: var(--pos); }
+.series-s2 { --series: var(--series-2); }
+.swatch.series-s1 { background: var(--pos); }
+.swatch.series-s2 { background: var(--series-2); }
+
+.chart-wrap svg .line {
+  fill: none;
+  stroke: var(--series);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chart-wrap svg .dot {
+  fill: var(--series);
+  /* 線と重なっても読めるよう、面の色で2pxのリングを付ける */
+  stroke: var(--surface-1);
+  stroke-width: 2;
+}
+.chart-wrap svg .bar.series-s1 { fill: var(--pos); }
+.chart-wrap svg .bar.series-s2 { fill: var(--series-2); }
+.chart-wrap svg .crosshair { stroke: var(--baseline); stroke-width: 1; }
+
+.mode-toggle { display: inline-flex; gap: 14px; font-size: 12px; color: var(--text-secondary); }
+.mode-toggle label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+
+.tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
+.tooltip .tt-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+/* ---- 財務指標テーブル ---- */
+.metrics-table { min-width: 620px; }
+.metrics-table td.label { line-height: 1.4; }
+.metrics-table .metric-note {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.metrics-table td.num { width: 116px; }
+.metrics-table td.muted { color: var(--text-muted); }
+.metrics-table td.up { color: var(--good); }
+.metrics-table td.down { color: var(--bad); }
 
 .legend-hint { color: var(--text-muted); margin-left: auto; }
 .table-hint { color: var(--text-muted); font-size: 12px; margin: 0 0 10px; }
