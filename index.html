@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CF計算書ジェネレーター | CF-visualization</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='16' width='6' height='13' rx='2' fill='%23898781'/%3E%3Crect x='13' y='6' width='6' height='13' rx='2' fill='%232a78d6'/%3E%3Crect x='23' y='12' width='6' height='17' rx='2' fill='%23e34948'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <h1>キャッシュ・フロー計算書 ジェネレーター</h1>
+  <p class="subtitle">貸借対照表(BS)・損益計算書(PL)・株主資本等変動計算書(SS)を入力すると、間接法によるキャッシュ・フロー計算書を自動作成して表示します。</p>
+</header>
+
+<main>
+  <section class="toolbar">
+    <button id="btn-sample" type="button" class="btn btn-secondary">サンプルデータを読み込む</button>
+    <button id="btn-clear" type="button" class="btn btn-ghost">入力をクリア</button>
+    <span class="unit-note">単位:千円(任意の単位でも可・入力は自動保存されます)</span>
+  </section>
+
+  <section class="inputs">
+    <!-- BS -->
+    <div class="card">
+      <h2>貸借対照表(BS)</h2>
+      <table class="input-table">
+        <thead>
+          <tr><th class="label-col">科目</th><th>前期末</th><th>当期末</th></tr>
+        </thead>
+        <tbody id="bs-body"><!-- JSで生成 --></tbody>
+        <tfoot>
+          <tr class="total-row"><td>資産合計</td><td id="bs-assets-prev">0</td><td id="bs-assets-curr">0</td></tr>
+          <tr class="total-row"><td>負債・純資産合計</td><td id="bs-liabeq-prev">0</td><td id="bs-liabeq-curr">0</td></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- PL -->
+    <div class="card">
+      <h2>損益計算書(PL)</h2>
+      <table class="input-table">
+        <thead>
+          <tr><th class="label-col">科目</th><th>当期</th></tr>
+        </thead>
+        <tbody id="pl-body"><!-- JSで生成 --></tbody>
+        <tfoot>
+          <tr class="total-row"><td>当期純利益(自動計算)</td><td id="pl-netincome">0</td></tr>
+        </tfoot>
+      </table>
+
+      <h2 class="section-gap">補足情報</h2>
+      <table class="input-table">
+        <tbody id="sup-body"><!-- JSで生成 --></tbody>
+      </table>
+    </div>
+
+    <!-- SS -->
+    <div class="card">
+      <h2>株主資本等変動計算書(SS)</h2>
+      <table class="input-table">
+        <thead>
+          <tr><th class="label-col">変動事由</th><th>当期</th></tr>
+        </thead>
+        <tbody id="ss-body"><!-- JSで生成 --></tbody>
+      </table>
+      <p class="hint">※ 当期純利益はPLから自動で引き継がれます。金額はすべて正の値で入力してください(支出・減少項目も正の値)。</p>
+    </div>
+  </section>
+
+  <section id="checks" class="checks" hidden></section>
+
+  <section id="results" hidden>
+    <div class="card chart-card">
+      <h2>キャッシュ・フローの推移(ウォーターフォール)</h2>
+      <div class="legend" id="wf-legend">
+        <span class="legend-item"><span class="swatch swatch-total"></span>残高</span>
+        <span class="legend-item"><span class="swatch swatch-pos"></span>増加</span>
+        <span class="legend-item"><span class="swatch swatch-neg"></span>減少</span>
+      </div>
+      <div class="chart-wrap">
+        <svg id="waterfall" role="img" aria-label="期首残高から営業・投資・財務活動によるキャッシュ・フローを経て期末残高に至るウォーターフォールチャート"></svg>
+        <div id="wf-tooltip" class="tooltip" hidden></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>キャッシュ・フロー計算書(間接法)</h2>
+      <p class="statement-meta">自 前期末翌日 至 当期末 (単位:千円)</p>
+      <table class="statement" id="cf-statement"><!-- JSで生成 --></table>
+      <details class="assumptions">
+        <summary>計算上の前提(簡便法)</summary>
+        <ul>
+          <li>利息及び配当金の受取額・利息の支払額・法人税等の支払額は、経過勘定を考慮せずPLの発生額をそのまま用いています。</li>
+          <li>有形固定資産の取得による支出は「期末純額 − 期首純額 + 減価償却費 + 売却簿価」で逆算しています(売却簿価 = 売却収入 − 売却損益)。</li>
+          <li>短期借入金・長期借入金・投資その他の資産はBSの増減額(純額)で表示しています。</li>
+          <li>現金及び現金同等物はBSの「現金及び預金」と一致するものとしています。</li>
+        </ul>
+      </details>
+    </div>
+  </section>
+
+  <section id="empty-state" class="empty-state">
+    <p>金額を入力するか、「サンプルデータを読み込む」を押すと、キャッシュ・フロー計算書とチャートがここに表示されます。</p>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <p>CF-visualization — BS・PL・SSからキャッシュ・フロー計算書を自動生成する静的Webアプリ</p>
+</footer>
+
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,256 @@
+/* ---- テーマトークン(ライト/ダーク) ---- */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --pos: #2a78d6;       /* 増加(青) */
+  --neg: #e34948;       /* 減少(赤) */
+  --total: #898781;     /* 残高(ニュートラル) */
+  --good: #006300;
+  --bad: #d03b3b;
+  --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --pos: #3987e5;
+    --neg: #e66767;
+    --total: #898781;
+    --good: #0ca30c;
+    --bad: #d03b3b;
+    --accent: #3987e5;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
+
+.site-header {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 20px 8px;
+}
+.site-header h1 { font-size: 22px; margin: 0 0 4px; }
+.subtitle { color: var(--text-secondary); margin: 0; }
+
+.site-footer {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px 20px 32px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ---- ツールバー ---- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.btn {
+  font: inherit;
+  padding: 7px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+.btn:hover { border-color: var(--accent); }
+.btn-secondary { background: var(--accent); color: #fff; border-color: transparent; }
+.btn-secondary:hover { opacity: 0.9; }
+.btn-ghost { background: transparent; }
+.unit-note { color: var(--text-muted); font-size: 12px; }
+
+/* ---- 入力カード ---- */
+.inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 18px 14px;
+}
+.card h2 { font-size: 15px; margin: 0 0 10px; }
+.section-gap { margin-top: 22px; }
+
+.input-table { width: 100%; border-collapse: collapse; }
+.input-table th {
+  text-align: right;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--grid);
+}
+.input-table th.label-col { text-align: left; }
+.input-table td { padding: 3px 6px; }
+.input-table td.label {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.input-table td.label .group-tag {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--grid);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.input-table input {
+  width: 100%;
+  min-width: 90px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding: 5px 8px;
+  border: 1px solid var(--grid);
+  border-radius: 6px;
+  background: var(--page);
+  color: var(--text-primary);
+}
+.input-table input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.input-table tfoot td {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding: 6px;
+  border-top: 1px solid var(--baseline);
+  font-weight: 600;
+}
+.input-table tfoot td:first-child { text-align: left; }
+.hint { color: var(--text-muted); font-size: 12px; margin: 10px 0 0; }
+
+/* ---- チェック結果 ---- */
+.checks { margin: 16px 0; display: grid; gap: 8px; }
+.check {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  font-size: 13px;
+}
+.check .icon { font-weight: 700; }
+.check.ok .icon { color: var(--good); }
+.check.ng .icon { color: var(--bad); }
+.check .detail { color: var(--text-secondary); }
+
+/* ---- チャート ---- */
+.chart-card { margin: 16px 0; }
+.legend { display: flex; gap: 16px; margin: 4px 0 8px; font-size: 12px; color: var(--text-secondary); }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.swatch-pos { background: var(--pos); }
+.swatch-neg { background: var(--neg); }
+.swatch-total { background: var(--total); }
+
+.chart-wrap { position: relative; width: 100%; }
+#waterfall { width: 100%; height: auto; display: block; }
+
+#waterfall .grid-line { stroke: var(--grid); stroke-width: 1; }
+#waterfall .baseline { stroke: var(--baseline); stroke-width: 1; }
+#waterfall .connector { stroke: var(--baseline); stroke-width: 1; }
+#waterfall .bar-pos { fill: var(--pos); }
+#waterfall .bar-neg { fill: var(--neg); }
+#waterfall .bar-total { fill: var(--total); }
+#waterfall .tick-label, #waterfall .cat-label { fill: var(--text-muted); font-size: 11px; }
+#waterfall .value-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+#waterfall .hit { fill: transparent; cursor: default; }
+#waterfall .hit:hover + g .bar, #waterfall g.band:hover .bar { opacity: 0.85; }
+
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+  z-index: 10;
+}
+.tooltip .tt-title { font-weight: 600; margin-bottom: 2px; }
+.tooltip .tt-value { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+
+/* ---- CF計算書 ---- */
+.statement-meta { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
+.statement { width: 100%; border-collapse: collapse; max-width: 640px; }
+.statement td {
+  padding: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.statement td.amount { text-align: right; white-space: nowrap; width: 130px; }
+.statement tr.head td {
+  font-weight: 700;
+  padding-top: 14px;
+  border-bottom: 1px solid var(--grid);
+}
+.statement tr.item td:first-child { padding-left: 24px; color: var(--text-secondary); }
+.statement tr.subtotal td {
+  border-top: 1px solid var(--baseline);
+  font-weight: 600;
+}
+.statement tr.section-total td {
+  border-top: 1px solid var(--baseline);
+  font-weight: 700;
+}
+.statement tr.grand td {
+  border-top: 2px solid var(--text-primary);
+  font-weight: 700;
+}
+.statement td.negative { color: inherit; }
+
+.assumptions { margin-top: 16px; font-size: 12px; color: var(--text-secondary); }
+.assumptions summary { cursor: pointer; color: var(--text-muted); }
+.assumptions ul { margin: 8px 0 0; padding-left: 20px; }
+
+.empty-state {
+  margin: 24px 0;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  border: 1px dashed var(--grid);
+  border-radius: 12px;
+}
+
+@media (max-width: 720px) {
+  .inputs { grid-template-columns: 1fr; }
+}
