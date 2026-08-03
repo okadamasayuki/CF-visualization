@@ -18,20 +18,14 @@
  *  good … 増減を色付けする向き。up=増加が良い、down=減少が良い、
  *         省略した指標は良し悪しが一概に言えないため色を付けない
  */
+// サマリーに出す指標はこの4つだけに絞っている。
+// 計算そのものは computeBaseMetrics が全指標分を持っているので、
+// 行を足したくなったらここに追記するだけでよい。
 const METRIC_ROWS = [
-  { key: "revenue", label: "売上高", kind: "amount", good: "up" },
-  { key: "operatingIncome", label: "営業利益", kind: "amount", good: "up" },
   { key: "ebitda", label: "EBITDA", kind: "amount", good: "up", note: "営業利益 + 減価償却費" },
-  { key: "ebitdaMargin", label: "EBITDAマージン", kind: "pct", good: "up", note: "EBITDA ÷ 売上高" },
   { key: "roic", label: "ROIC", kind: "pct", good: "up", note: "NOPAT(年換算) ÷ 投下資本(期首期末平均)" },
   { key: "workingCapital", label: "運転資金", kind: "amount", note: "営業債権 + 棚卸資産 − 営業債務" },
   { key: "interestBearingDebt", label: "有利子負債", kind: "amount", good: "down", note: "短期借入金 + 長期借入金" },
-  { key: "deposits", label: "預け金", kind: "amount" },
-  { key: "cashAndDeposits", label: "現金及び預金 + 預け金", kind: "amount", good: "up" },
-  { key: "netDebt", label: "ネット有利子負債", kind: "amount", good: "down", note: "有利子負債 − (現金及び預金 + 預け金)" },
-  { key: "equityRatio", label: "自己資本比率", kind: "pct", good: "up", note: "純資産 ÷ 総資産" },
-  { key: "operatingCF", label: "営業CF", kind: "amount", good: "up", cf: true },
-  { key: "freeCF", label: "フリーCF", kind: "amount", good: "up", cf: true, note: "営業CF + 投資CF" },
 ];
 
 const DEFAULT_TAX_RATE = 0.3;

@@ -481,14 +481,16 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .tooltip .tt-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 
 /* ---- 財務指標テーブル ---- */
-.metrics-table { min-width: 620px; }
+.metrics-table { width: 100%; }
 .metrics-table td.label { line-height: 1.4; }
 .metrics-table .metric-note {
   display: block;
   font-size: 11px;
   color: var(--text-muted);
 }
-.metrics-table td.num { width: 116px; }
+.metrics-table td.num { width: 92px; }
+/* 指標名の注記(算式)は列幅を圧迫しないよう、200pxで折り返す */
+.metrics-table .metric-note { white-space: normal; max-width: 200px; }
 .metrics-table td.muted { color: var(--text-muted); }
 .metrics-table td.up { color: var(--good); }
 .metrics-table td.down { color: var(--bad); }
