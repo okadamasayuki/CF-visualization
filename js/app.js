@@ -34,7 +34,7 @@ const state = {
   company: "",
   period: "",
   measure: "operatingCF",
-  sort: { key: null, dir: 1 },
+  sort: { key: "name", dir: 1 },  // 会社別サマリーの並び順
   trendMode: "balance", // balance | delta
   sources: [],
   tab: "source",
@@ -802,78 +802,91 @@ function renderOverviewChart() {
   });
 }
 
-function renderOverviewTable() {
-  const table = document.getElementById("overview-table");
-  table.innerHTML = "";
-  const rows = overviewRows();
+/** 並び替えの選択肢。数値は多い順、会社名は五十音順 */
+const OVERVIEW_SORTS = [
+  { key: "name", dir: 1, label: "会社名(五十音順)" },
+  ...OVERVIEW_COLS.filter((c) => !c.type).map((c) => ({
+    key: c.key, dir: -1, label: `${c.label}が多い順`,
+  })),
+  { key: "ok", dir: 1, label: "整合しないものを先頭に" },
+];
 
+function renderOverviewSortPicker() {
+  const select = document.getElementById("overview-sort");
+  if (!select.options.length) {
+    for (const o of OVERVIEW_SORTS) select.append(el("option", { value: o.key, text: o.label }));
+    select.addEventListener("change", (ev) => {
+      const picked = OVERVIEW_SORTS.find((o) => o.key === ev.target.value) || OVERVIEW_SORTS[0];
+      state.sort = { key: picked.key, dir: picked.dir };
+      renderOverviewCards();
+    });
+  }
+  select.value = state.sort.key || "name";
+}
+
+function sortOverviewRows(rows) {
   const { key, dir } = state.sort;
-  if (key) {
-    rows.sort((a, b) => {
-      if (key === "name") return a.name.localeCompare(b.name, "ja") * dir;
-      if (key === "ok") return ((a.ok ? 1 : 0) - (b.ok ? 1 : 0)) * dir;
-      const av = a[key], bv = b[key];
-      if (av === null || av === undefined) return 1;
-      if (bv === null || bv === undefined) return -1;
-      return (av - bv) * dir;
-    });
-  }
+  if (!key) return rows;
+  return rows.sort((a, b) => {
+    if (key === "name") return a.name.localeCompare(b.name, "ja") * dir;
+    if (key === "ok") return ((a.ok ? 1 : 0) - (b.ok ? 1 : 0)) * dir;
+    const av = a[key], bv = b[key];
+    if (av === null || av === undefined) return 1;
+    if (bv === null || bv === undefined) return -1;
+    return (av - bv) * dir;
+  });
+}
 
-  const htr = el("tr");
-  for (const col of OVERVIEW_COLS) {
-    const th = el("th", {
-      class: col.type === "text" ? "label-col" : col.type === "check" ? "check-col" : "",
-      scope: "col", role: "button", tabindex: "0",
-      "aria-sort": key === col.key ? (dir === 1 ? "ascending" : "descending") : "none",
-    });
-    th.append(col.label);
-    if (key === col.key) th.append(el("span", { class: "sort-arrow", text: dir === 1 ? " ▲" : " ▼" }));
-    const sort = () => {
-      state.sort = key === col.key
-        ? { key: col.key, dir: -dir }
-        : { key: col.key, dir: col.type === "text" ? 1 : -1 };
-      renderOverviewTable();
-    };
-    th.addEventListener("click", sort);
-    th.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); sort(); }
-    });
-    htr.append(th);
-  }
-  table.append(el("thead", {}, htr));
+/** 会社ごとに1枚のカード。指標を縦に並べ、カード自体を横に並べる */
+function renderOverviewCards() {
+  const grid = document.getElementById("overview-cards");
+  grid.innerHTML = "";
+  renderOverviewSortPicker();
+  const rows = sortOverviewRows(overviewRows());
+  const fields = OVERVIEW_COLS.filter((c) => !c.type);
 
-  const tbody = el("tbody");
-  for (const r of rows) {
-    const tr = el("tr", {
-      class: r.name === state.company ? "is-selected" : "",
-      role: "button", tabindex: "0", "aria-label": `${r.name}の明細を表示`,
-    });
-    tr.append(el("td", { class: "label", text: r.name }));
-    for (const col of OVERVIEW_COLS.slice(1, -1)) {
-      tr.append(el("td", { class: "num", text: fmtBy(col.kind, r[col.key]) }));
+  const card = (name, values, { total = false, ok = null, selected = false } = {}) => {
+    const box = el("div", { class: `company-card${total ? " is-total" : ""}${selected ? " is-selected" : ""}` });
+    const head = el("div", { class: "company-card-head" });
+    head.append(el("span", { class: "company-card-name", text: name }));
+    if (ok !== null) {
+      head.append(el("span", {
+        class: `company-card-check ${ok ? "ok" : "ng"}`,
+        text: ok ? "✓" : "!",
+        title: ok ? "整合性チェックはすべてOK" : "整合しない項目があります",
+      }));
     }
-    const okTd = el("td", { class: `num check-col ${r.ok ? "ok" : "ng"}`, text: r.ok ? "✓" : "!" });
-    okTd.setAttribute("title", r.ok ? "整合性チェックはすべてOK" : "整合しない項目があります");
-    tr.append(okTd);
-    tr.addEventListener("click", () => selectCompany(r.name));
-    tr.addEventListener("keydown", (ev) => {
+    box.append(head);
+    const list = el("dl", { class: "company-metrics" });
+    for (const f of fields) {
+      const row = el("div", { class: "company-metric" });
+      row.append(el("dt", { text: f.label }));
+      row.append(el("dd", { text: values(f) }));
+      list.append(row);
+    }
+    box.append(list);
+    return box;
+  };
+
+  for (const r of rows) {
+    const box = card(r.name, (f) => fmtBy(f.kind, r[f.key]),
+      { ok: r.ok, selected: r.name === state.company });
+    box.setAttribute("role", "button");
+    box.setAttribute("tabindex", "0");
+    box.setAttribute("aria-label", `${r.name}のサマリーを表示`);
+    box.addEventListener("click", () => selectCompany(r.name));
+    box.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectCompany(r.name); }
     });
-    tbody.append(tr);
+    grid.append(box);
   }
-  table.append(tbody);
 
-  // 合計行(比率は合算できないので空欄にする)
-  const ftr = el("tr");
-  ftr.append(el("td", { class: "label", text: `合計(${rows.length}社)` }));
-  for (const col of OVERVIEW_COLS.slice(1, -1)) {
-    if (col.kind === "pct") { ftr.append(el("td", { class: "num muted", text: "—" })); continue; }
-    const vals = rows.map((r) => r[col.key]).filter((v) => v !== null && v !== undefined);
-    ftr.append(el("td", { class: "num", text: vals.length ? fmt(vals.reduce((s, v) => s + v, 0)) : "—" }));
-  }
-  const ng = rows.filter((r) => !r.ok).length;
-  ftr.append(el("td", { class: `num check-col ${ng ? "ng" : "ok"}`, text: ng ? `${ng}社` : "✓" }));
-  table.append(el("tfoot", {}, ftr));
+  // 合計のカード(比率は合算できないので空欄にする)
+  grid.append(card(`合計(${rows.length}社)`, (f) => {
+    if (f.kind === "pct") return "—";
+    const vals = rows.map((r) => r[f.key]).filter((v) => v !== null && v !== undefined);
+    return vals.length ? fmt(vals.reduce((s, v) => s + v, 0)) : "—";
+  }, { total: true }));
 }
 
 /* =========================================================
@@ -1778,7 +1791,7 @@ function selectTab(id) {
   // 表示された瞬間に最新の内容を描く(重い「データ」タブは開くまで作らない)
   if (id === "data") renderData();
   if (id === "trend") renderTrend();
-  if (id === "overview") { renderOverviewChart(); renderOverviewTable(); }
+  if (id === "overview") { renderOverviewChart(); renderOverviewCards(); }
   if (id === "logic") renderDerivation();
   if (id === "detail") renderDetailPanel();
 }
@@ -1905,7 +1918,7 @@ function renderAll() {
     document.getElementById("chart-measure-label").textContent =
       MEASURES.find((m) => m.key === state.measure).label;
     renderOverviewChart();
-    renderOverviewTable();
+    renderOverviewCards();
   }
 
   if (state.tab === "logic") { renderDerivationDiagram(); renderDerivationText(); }
@@ -2034,7 +2047,7 @@ function buildState(datasets, warnings) {
     const fallback = state.companies.find((c) => state.byKey.has(keyOf(c, state.period)));
     if (fallback) state.company = fallback;
   }
-  state.sort = { key: null, dir: 1 };
+  state.sort = { key: "name", dir: 1 };
 }
 
 /** 画面で手入力した詳細情報を、読み込み直したデータに再適用する */

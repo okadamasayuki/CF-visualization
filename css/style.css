@@ -562,6 +562,58 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 }
 .btn-link:hover { opacity: 0.8; }
 
+/* ---- 会社別サマリー(会社ごとのカードを横に並べる) ---- */
+.company-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+@media (max-width: 900px) { .company-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .company-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.company-card {
+  border: 1px solid var(--grid);
+  border-radius: 10px;
+  background: var(--page);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.company-card:hover { border-color: var(--accent); }
+.company-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.company-card.is-selected { border-color: var(--accent); background: var(--accent-wash); }
+.company-card.is-total { cursor: default; border-style: dashed; background: var(--surface-1); }
+.company-card.is-total:hover { border-color: var(--grid); }
+
+.company-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--grid);
+}
+.company-card-name { font-weight: 700; }
+.company-card-check { font-weight: 700; font-size: 13px; }
+.company-card-check.ok { color: var(--good); }
+.company-card-check.ng { color: var(--bad); }
+
+.company-metrics { margin: 8px 0 0; }
+.company-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+.company-metric dt { color: var(--text-secondary); white-space: nowrap; }
+.company-metric dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---- 選んだ会社×四半期のデータがないときの案内 ---- */
 .missing-notice {
   border: 1px solid var(--warn);

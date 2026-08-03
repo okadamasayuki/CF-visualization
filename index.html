@@ -239,12 +239,23 @@
 
     <!-- ===== 全社比較 ===== -->
     <section id="panel-overview" class="panel" role="tabpanel" aria-labelledby="tab-overview" tabindex="0" hidden>
-      <div class="card chart-card">
+      <div class="card">
         <div class="chart-head">
-          <h3><span id="chart-measure-label">営業CF</span>の比較
+          <h3>会社別サマリー
             <span id="overview-subject" class="count-badge"></span>
             <span id="overview-count" class="count-badge"></span>
           </h3>
+          <label class="field">並び替え
+            <select id="overview-sort"></select>
+          </label>
+        </div>
+        <p class="table-hint">カードをクリックすると、その会社のサマリーを表示します。</p>
+        <div id="overview-cards" class="company-grid"></div>
+      </div>
+
+      <div class="card chart-card">
+        <div class="chart-head">
+          <h3><span id="chart-measure-label">営業CF</span>の比較</h3>
           <label class="field">指標
             <select id="measure-select"></select>
           </label>
@@ -259,14 +270,6 @@
           <div id="ov-tooltip" class="tooltip" hidden></div>
         </div>
         <p id="overview-missing" class="hint" hidden></p>
-      </div>
-
-      <div class="card">
-        <h3>会社別サマリー</h3>
-        <p class="table-hint">見出しをクリックすると並べ替え、行をクリックするとその会社のサマリーを表示します。</p>
-        <div class="table-scroll">
-          <table class="data-table overview-table" id="overview-table"></table>
-        </div>
       </div>
     </section>
 
