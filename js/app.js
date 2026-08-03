@@ -37,7 +37,7 @@ const state = {
   sort: { key: "name", dir: 1 },  // 会社別サマリーの並び順
   trendMode: "balance", // balance | delta
   sources: [],
-  tab: "source",
+  tab: "summary",
   // 共有フォルダ連携の状態(dir はディレクトリハンドル)
   share: { dir: null, auto: true, stamps: new Map(), busy: false, timer: null, suppress: false, scheme: null, saved: false },
   derivLine: 0,           // 算定ロジックで選択中のCF行
@@ -1642,7 +1642,6 @@ async function handleDetailFiles(fileList) {
 const hasData = () => state.datasets.length > 0;
 
 const TABS = [
-  { id: "source" },
   // CF計算書・財務指標・推移は1つの画面にまとめている
   { id: "summary", needs: hasData },
   { id: "overview", needs: () => hasData() && state.companies.length > 1 },
@@ -1655,7 +1654,8 @@ function visibleTabs() {
 }
 
 function selectTab(id) {
-  if (!visibleTabs().some((t) => t.id === id)) id = hasData() ? "summary" : "source";
+  if (!hasData()) return;
+  if (!visibleTabs().some((t) => t.id === id)) id = "summary";
   state.tab = id;
   for (const t of TABS) {
     const btn = document.getElementById(`tab-${t.id}`);
@@ -1665,7 +1665,7 @@ function selectTab(id) {
     btn.tabIndex = active ? 0 : -1;
     panel.hidden = !active;
   }
-  document.getElementById("selector-bar").hidden = !hasData() || id === "source" ||
+  document.getElementById("selector-bar").hidden = !hasData() ||
     (state.companies.length <= 1 && state.periods.length <= 1);
   // グラフは表示されてから幅を測る(隠れている間は幅が0のため)
   if (id === "summary") renderTrend();
@@ -1676,10 +1676,14 @@ function selectTab(id) {
 
 function renderTabs() {
   const shown = visibleTabs().map((t) => t.id);
+  document.getElementById("tablist").hidden = shown.length === 0;
+  document.getElementById("empty-state").hidden = shown.length !== 0;
   for (const t of TABS) {
     document.getElementById(`tab-${t.id}`).hidden = !shown.includes(t.id);
+    if (shown.length === 0) document.getElementById(`panel-${t.id}`).hidden = true;
   }
-  selectTab(shown.includes(state.tab) ? state.tab : (hasData() ? "summary" : "source"));
+  if (shown.length === 0) return;
+  selectTab(shown.includes(state.tab) ? state.tab : "summary");
 }
 
 /* =========================================================
@@ -1993,8 +1997,7 @@ function applySources(sources) {
   renderMessages(errors, warnings);
   renderSelectors();
   renderAll();
-  // 読み込み画面に留まらず、結果まで進む
-  if (state.tab === "source") selectTab("summary");
+  closeSourceModal();
 
   saveState();
 }
@@ -2028,6 +2031,34 @@ function clearAll() {
   messages.innerHTML = "";
   try { localStorage.removeItem(STORAGE_KEY); } catch (_) { /* 無視 */ }
   showEmptyState();
+}
+
+/* =========================================================
+ * 読み込みモーダル
+ * ======================================================= */
+
+function openSourceModal() {
+  document.getElementById("source-modal").hidden = false;
+  document.body.style.overflow = "hidden"; // 背面のページは動かさない
+}
+
+function closeSourceModal() {
+  document.getElementById("source-modal").hidden = true;
+  document.body.style.overflow = "";
+}
+
+function bindSourceModal() {
+  const backdrop = document.getElementById("source-modal");
+  document.getElementById("btn-open-source").addEventListener("click", openSourceModal);
+  document.getElementById("btn-open-source-empty").addEventListener("click", openSourceModal);
+  document.getElementById("btn-close-source").addEventListener("click", closeSourceModal);
+  // 外側(背景)をクリックしたら閉じる
+  backdrop.addEventListener("mousedown", (ev) => {
+    if (ev.target === backdrop) closeSourceModal();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !backdrop.hidden) closeSourceModal();
+  });
 }
 
 /* =========================================================
@@ -2421,5 +2452,8 @@ document.addEventListener("DOMContentLoaded", () => {
   } catch (_) { /* 無視 */ }
 
   renderTabs();
+  bindSourceModal();
   bindShareUI();
+  // まだ何も読み込まれていなければ、読み込み画面を開いた状態で始める
+  if (!hasData()) openSourceModal();
 });

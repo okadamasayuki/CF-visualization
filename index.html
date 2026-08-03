@@ -9,8 +9,11 @@
 </head>
 <body>
 <header class="site-header">
-  <h1>キャッシュ・フロー計算書 ジェネレーター</h1>
-  <p class="subtitle">BS・PL・SSをまとめたCSVをアップロードすると、会社と四半期ごとにキャッシュ・フロー計算書と財務指標を自動作成します。</p>
+  <div class="site-header-text">
+    <h1>キャッシュ・フロー計算書 ジェネレーター</h1>
+    <p class="subtitle">BS・PL・SSをまとめたCSVをアップロードすると、会社と四半期ごとにキャッシュ・フロー計算書と財務指標を自動作成します。</p>
+  </div>
+  <button id="btn-open-source" type="button" class="btn btn-secondary">読み込み</button>
 </header>
 
 <main>
@@ -27,10 +30,8 @@
   <div id="workspace">
     <!-- ===== タブ ===== -->
     <div class="tabs" role="tablist" aria-label="表示の切り替え" id="tablist">
-      <button type="button" class="tab" role="tab" id="tab-source" data-tab="source"
-              aria-controls="panel-source" aria-selected="true" tabindex="0">読み込み</button>
       <button type="button" class="tab" role="tab" id="tab-summary" data-tab="summary"
-              aria-controls="panel-summary" aria-selected="false" tabindex="-1">サマリー</button>
+              aria-controls="panel-summary" aria-selected="true" tabindex="0">サマリー</button>
       <button type="button" class="tab" role="tab" id="tab-overview" data-tab="overview"
               aria-controls="panel-overview" aria-selected="false" tabindex="-1">全社比較</button>
       <button type="button" class="tab" role="tab" id="tab-detail" data-tab="detail"
@@ -39,109 +40,9 @@
               aria-controls="panel-logic" aria-selected="false" tabindex="-1">算定ロジック</button>
     </div>
 
-    <!-- ===== 読み込み ===== -->
-    <section id="panel-source" class="panel" role="tabpanel" aria-labelledby="tab-source" tabindex="0">
-    <section class="card">
-      <label id="dropzone" class="dropzone" for="file-input">
-        <input type="file" id="file-input" accept=".csv,.tsv,.txt,text/csv" multiple hidden>
-        <span class="dz-icon" aria-hidden="true">
-          <svg viewBox="0 0 48 48" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M24 32V10"></path><path d="M15 19l9-9 9 9"></path>
-            <path d="M8 30v6a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-6"></path>
-          </svg>
-        </span>
-        <span class="dz-title">CSVファイルをドラッグ&amp;ドロップ、またはクリックして選択</span>
-        <span class="dz-note">複数社・複数四半期を1ファイルにまとめてもOK / 複数ファイルの同時選択も可 / UTF-8・Shift_JIS 対応</span>
-      </label>
-
-      <div class="toolbar">
-        <button id="btn-sample-27" type="button" class="btn btn-secondary">サンプル(270ファイル / 27社×10四半期)</button>
-        <button id="btn-sample" type="button" class="btn">サンプル(1社)</button>
-        <button id="btn-template" type="button" class="btn">テンプレートCSVをダウンロード</button>
-        <button id="btn-export" type="button" class="btn" hidden>読み込んだ内容をCSVで保存</button>
-        <button id="btn-clear" type="button" class="btn btn-ghost" hidden>クリア</button>
-      </div>
-
-      <p id="file-status" class="file-status" hidden></p>
-      <div id="storage-warning" class="message error" hidden>
-        <span class="icon">!</span><span class="text"></span>
-      </div>
-      <div id="messages" class="messages" hidden></div>
-
-      <details class="format-help">
-        <summary>CSVの書式について</summary>
-        <p>1行目に見出し、2行目以降に科目と金額を並べた縦持ち形式です。<code>会社名</code>と<code>四半期</code>の列を入れると、複数社・複数四半期を1ファイルにまとめられます(どちらも任意)。実際のデータは「データ」タブで表形式のまま確認できます。</p>
-<pre><code>会社名,四半期,区分,科目,前期末,当期末
-アルファ工業,2025Q1,BS,現金及び預金,11700,15900
-アルファ工業,2025Q1,BS,預け金,4000,4600
-アルファ工業,2025Q1,PL,売上高,,52000
-アルファ工業,2025Q2,BS,現金及び預金,,17200
-ブライト電機,2025Q1,BS,現金及び預金,8000,9500</code></pre>
-        <ul>
-          <li><strong>2四半期目以降は<code>前期末</code>を省略できます。</strong>直前の四半期の期末残高を期首として自動で引き継ぎます。</li>
-          <li><code>四半期</code>は <code>2025Q1</code> / <code>FY2025Q1</code> / <code>2025年度第1四半期</code> / <code>2025年1Q</code> / <code>2025-03</code> などの表記を解釈します。</li>
-          <li>金額は <code>1,234</code> / <code>¥1,234</code> / <code>△1,234</code> / <code>(1,234)</code> / <code>-1,234</code> のいずれの表記でも読み取れます。</li>
-          <li>科目名は別名に対応しています(例:<code>売掛金</code>・<code>受取手形</code> → 営業債権)。同じ会社・同じ四半期の同じ科目に複数行あれば合算します。</li>
-          <li><code>会社名</code>・<code>四半期</code>を空欄にした行は、直前の行の値を引き継ぎます。</li>
-          <li><code>会社名</code>列がないファイルは、ファイル名を会社名として扱います。</li>
-          <li>SSと補足情報の金額は、支出・減少項目もすべて正の値で入力してください。</li>
-        </ul>
-      </details>
-    </section>
-
-      <!-- 共有フォルダ -->
-      <section class="card" id="share-card">
-        <div class="chart-head">
-          <h3>共有フォルダ <span id="share-state" class="count-badge">未接続</span></h3>
-        </div>
-        <p class="hint" id="share-lead">
-          社内の共有フォルダ(ネットワークドライブ、OneDrive・Google ドライブの同期フォルダなど)を指定すると、
-          読み込んだデータと詳細入力をそのフォルダに保存し、次からはそこから読み込みます。
-          同じフォルダを見ている人どうしでデータを共有できます。
-        </p>
-        <div id="share-unsupported" class="message warn" hidden>
-          <span class="icon">!</span>
-          <span id="share-unsupported-text"></span>
-        </div>
-        <div id="share-controls" hidden>
-          <p id="share-path" class="share-path" hidden></p>
-          <div class="toolbar">
-            <button id="btn-share-pick" type="button" class="btn btn-secondary">共有フォルダを選ぶ</button>
-            <button id="btn-share-reconnect" type="button" class="btn btn-secondary" hidden>共有フォルダに再接続</button>
-            <button id="btn-share-pull" type="button" class="btn" hidden>フォルダから読み込む</button>
-            <button id="btn-share-push" type="button" class="btn" hidden>フォルダへ書き出す</button>
-            <button id="btn-share-migrate" type="button" class="btn" hidden>この端末のデータをフォルダへ移す</button>
-            <button id="btn-share-sync" type="button" class="btn btn-ghost" hidden>不要なファイルも含めて完全に同期</button>
-            <button id="btn-share-disconnect" type="button" class="btn btn-ghost" hidden>接続を解除</button>
-          </div>
-          <label class="field checkbox" id="share-auto-field" hidden>
-            <input type="checkbox" id="share-auto" checked>
-            変更したら自動でフォルダへ書き出す
-          </label>
-          <p id="share-status" class="file-status" hidden></p>
-          <div id="share-update" class="message warn" hidden>
-            <span class="icon">!</span>
-            <span>
-              <span id="share-update-text">共有フォルダが更新されています。</span>
-              <button id="btn-share-reload" type="button" class="btn btn-link">読み込む</button>
-            </span>
-          </div>
-          <details class="format-help">
-            <summary>フォルダの中身と、共同利用のときの注意</summary>
-            <p>指定したフォルダの中に、次の構成で読み書きします。専用のフォルダを指定してください。</p>
-<pre><code>&lt;共有フォルダ&gt;/
-  data/         読み込んだCSVをそのまま置きます
-  overrides/    詳細入力を 会社×四半期ごとのJSONで置きます
-  settings.json 表示区分などの設定と、最終更新の記録</code></pre>
-            <ul>
-              <li><strong>ファイル単位で「最後に保存した人が勝ち」</strong>です。会社×四半期ごとにCSVを分けておくと、同時に作業してもぶつかりにくくなります。</li>
-              <li>他の人がフォルダを更新すると、このページに戻ったときに案内が出ます。読み込むまでこちらの表示は変わりません。</li>
-              <li>自動書き出しでは、フォルダにある他のファイルを消しません。整理したいときだけ「完全に同期」を使ってください。</li>
-              <li>接続したフォルダはブラウザが記憶します。次に開いたときは「共有フォルダに再接続」を押すと、選び直さずに使えます。</li>
-            </ul>
-          </details>
-        </div>
-      </section>
+    <section id="empty-state" class="empty-state">
+      <p>CSVファイルを読み込むと、キャッシュ・フロー計算書と財務指標がここに表示されます。</p>
+      <p><button id="btn-open-source-empty" type="button" class="btn btn-secondary">読み込みを開く</button></p>
     </section>
 
     <!-- ===== サマリー ===== -->
@@ -357,6 +258,118 @@
   </div>
 
 </main>
+
+
+<!-- ===== 読み込み(モーダル) ===== -->
+<div id="source-modal" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="source-modal-title">
+    <div class="modal-head">
+      <h2 id="source-modal-title">データの読み込み</h2>
+      <button id="btn-close-source" type="button" class="btn btn-ghost" aria-label="閉じる">✕ 閉じる</button>
+    </div>
+    <section class="card">
+      <label id="dropzone" class="dropzone" for="file-input">
+        <input type="file" id="file-input" accept=".csv,.tsv,.txt,text/csv" multiple hidden>
+        <span class="dz-icon" aria-hidden="true">
+          <svg viewBox="0 0 48 48" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M24 32V10"></path><path d="M15 19l9-9 9 9"></path>
+            <path d="M8 30v6a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-6"></path>
+          </svg>
+        </span>
+        <span class="dz-title">CSVファイルをドラッグ&amp;ドロップ、またはクリックして選択</span>
+        <span class="dz-note">複数社・複数四半期を1ファイルにまとめてもOK / 複数ファイルの同時選択も可 / UTF-8・Shift_JIS 対応</span>
+      </label>
+
+      <div class="toolbar">
+        <button id="btn-sample-27" type="button" class="btn btn-secondary">サンプル(270ファイル / 27社×10四半期)</button>
+        <button id="btn-sample" type="button" class="btn">サンプル(1社)</button>
+        <button id="btn-template" type="button" class="btn">テンプレートCSVをダウンロード</button>
+        <button id="btn-export" type="button" class="btn" hidden>読み込んだ内容をCSVで保存</button>
+        <button id="btn-clear" type="button" class="btn btn-ghost" hidden>クリア</button>
+      </div>
+
+      <p id="file-status" class="file-status" hidden></p>
+      <div id="storage-warning" class="message error" hidden>
+        <span class="icon">!</span><span class="text"></span>
+      </div>
+      <div id="messages" class="messages" hidden></div>
+
+      <details class="format-help">
+        <summary>CSVの書式について</summary>
+        <p>1行目に見出し、2行目以降に科目と金額を並べた縦持ち形式です。<code>会社名</code>と<code>四半期</code>の列を入れると、複数社・複数四半期を1ファイルにまとめられます(どちらも任意)。実際のデータは「データ」タブで表形式のまま確認できます。</p>
+<pre><code>会社名,四半期,区分,科目,前期末,当期末
+アルファ工業,2025Q1,BS,現金及び預金,11700,15900
+アルファ工業,2025Q1,BS,預け金,4000,4600
+アルファ工業,2025Q1,PL,売上高,,52000
+アルファ工業,2025Q2,BS,現金及び預金,,17200
+ブライト電機,2025Q1,BS,現金及び預金,8000,9500</code></pre>
+        <ul>
+          <li><strong>2四半期目以降は<code>前期末</code>を省略できます。</strong>直前の四半期の期末残高を期首として自動で引き継ぎます。</li>
+          <li><code>四半期</code>は <code>2025Q1</code> / <code>FY2025Q1</code> / <code>2025年度第1四半期</code> / <code>2025年1Q</code> / <code>2025-03</code> などの表記を解釈します。</li>
+          <li>金額は <code>1,234</code> / <code>¥1,234</code> / <code>△1,234</code> / <code>(1,234)</code> / <code>-1,234</code> のいずれの表記でも読み取れます。</li>
+          <li>科目名は別名に対応しています(例:<code>売掛金</code>・<code>受取手形</code> → 営業債権)。同じ会社・同じ四半期の同じ科目に複数行あれば合算します。</li>
+          <li><code>会社名</code>・<code>四半期</code>を空欄にした行は、直前の行の値を引き継ぎます。</li>
+          <li><code>会社名</code>列がないファイルは、ファイル名を会社名として扱います。</li>
+          <li>SSと補足情報の金額は、支出・減少項目もすべて正の値で入力してください。</li>
+        </ul>
+      </details>
+    </section>
+
+      <!-- 共有フォルダ -->
+      <section class="card" id="share-card">
+        <div class="chart-head">
+          <h3>共有フォルダ <span id="share-state" class="count-badge">未接続</span></h3>
+        </div>
+        <p class="hint" id="share-lead">
+          社内の共有フォルダ(ネットワークドライブ、OneDrive・Google ドライブの同期フォルダなど)を指定すると、
+          読み込んだデータと詳細入力をそのフォルダに保存し、次からはそこから読み込みます。
+          同じフォルダを見ている人どうしでデータを共有できます。
+        </p>
+        <div id="share-unsupported" class="message warn" hidden>
+          <span class="icon">!</span>
+          <span id="share-unsupported-text"></span>
+        </div>
+        <div id="share-controls" hidden>
+          <p id="share-path" class="share-path" hidden></p>
+          <div class="toolbar">
+            <button id="btn-share-pick" type="button" class="btn btn-secondary">共有フォルダを選ぶ</button>
+            <button id="btn-share-reconnect" type="button" class="btn btn-secondary" hidden>共有フォルダに再接続</button>
+            <button id="btn-share-pull" type="button" class="btn" hidden>フォルダから読み込む</button>
+            <button id="btn-share-push" type="button" class="btn" hidden>フォルダへ書き出す</button>
+            <button id="btn-share-migrate" type="button" class="btn" hidden>この端末のデータをフォルダへ移す</button>
+            <button id="btn-share-sync" type="button" class="btn btn-ghost" hidden>不要なファイルも含めて完全に同期</button>
+            <button id="btn-share-disconnect" type="button" class="btn btn-ghost" hidden>接続を解除</button>
+          </div>
+          <label class="field checkbox" id="share-auto-field" hidden>
+            <input type="checkbox" id="share-auto" checked>
+            変更したら自動でフォルダへ書き出す
+          </label>
+          <p id="share-status" class="file-status" hidden></p>
+          <div id="share-update" class="message warn" hidden>
+            <span class="icon">!</span>
+            <span>
+              <span id="share-update-text">共有フォルダが更新されています。</span>
+              <button id="btn-share-reload" type="button" class="btn btn-link">読み込む</button>
+            </span>
+          </div>
+          <details class="format-help">
+            <summary>フォルダの中身と、共同利用のときの注意</summary>
+            <p>指定したフォルダの中に、次の構成で読み書きします。専用のフォルダを指定してください。</p>
+<pre><code>&lt;共有フォルダ&gt;/
+  data/         読み込んだCSVをそのまま置きます
+  overrides/    詳細入力を 会社×四半期ごとのJSONで置きます
+  settings.json 表示区分などの設定と、最終更新の記録</code></pre>
+            <ul>
+              <li><strong>ファイル単位で「最後に保存した人が勝ち」</strong>です。会社×四半期ごとにCSVを分けておくと、同時に作業してもぶつかりにくくなります。</li>
+              <li>他の人がフォルダを更新すると、このページに戻ったときに案内が出ます。読み込むまでこちらの表示は変わりません。</li>
+              <li>自動書き出しでは、フォルダにある他のファイルを消しません。整理したいときだけ「完全に同期」を使ってください。</li>
+              <li>接続したフォルダはブラウザが記憶します。次に開いたときは「共有フォルダに再接続」を押すと、選び直さずに使えます。</li>
+            </ul>
+          </details>
+        </div>
+      </section>
+  </div>
+</div>
 
 <footer class="site-footer">
   <p>CF-visualization — BS・PL・SSのCSVからキャッシュ・フロー計算書と財務指標を自動生成する静的Webアプリ</p>
