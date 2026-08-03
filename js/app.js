@@ -544,13 +544,16 @@ function renderTrend() {
     svg.append(lbl);
   });
 
-  // --- 各棒の真下に数値。行の左端は色の四角だけで系列を示す ---
+  // --- 各棒の真下に数値。行の左端に 色の四角 + 系列名 を置く ---
   TREND_SERIES.forEach((s2, si) => {
     const rowY = catY + 19 + si * VROW;
     svg.append(svgEl("rect", {
       class: `bar series-${s2.cls} trend-row-swatch`,
       x: 10, y: rowY - 8.5, width: 10, height: 10, rx: 2,
     }));
+    const name = svgEl("text", { class: "trend-row-label", x: 25, y: rowY });
+    name.textContent = s2.short || s2.label;
+    svg.append(name);
     points.forEach((p, i) => {
       const v = p.values[si];
       const t = svgEl("text", {

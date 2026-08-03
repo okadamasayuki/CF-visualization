@@ -575,6 +575,7 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   font-variant-numeric: tabular-nums;
 }
 .chart-wrap svg .trend-num.muted { fill: var(--text-muted); }
+.chart-wrap svg .trend-row-label { fill: var(--text-secondary); font-size: 11px; }
 
 /* ---- 会社別サマリー(会社ごとのカードを横に並べる) ---- */
 .company-grid {
