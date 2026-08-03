@@ -461,32 +461,48 @@ function positionTooltip(tooltip, svg, ev) {
  * ======================================================= */
 
 const TREND_SERIES = [
-  { key: "deposits", label: "預け金", cls: "s1" },
-  { key: "interestBearingDebt", label: "借入金(有利子負債)", cls: "s2" },
+  { key: "deposits", label: "預け金", short: "預け金", cls: "s1" },
+  { key: "interestBearingDebt", label: "借入金(有利子負債)", short: "借入金", cls: "s2" },
 ];
 
+/**
+ * 表示する四半期の窓。会社ごとの系列ではなく全体の四半期軸から取るので、
+ * その会社にデータのない四半期も「—」の列として必ず並ぶ
+ * (一部の四半期を消したとき、窓が縮んで直近だけにならないように)。
+ */
 function trendWindow() {
-  const series = state.byCompany.get(state.company) || [];
-  const at = series.findIndex((d) => d.period.label === state.period);
-  const end = at >= 0 ? at + 1 : series.length;
-  return { series, window: series.slice(Math.max(0, end - TREND_QUARTERS), end) };
+  const at = state.periods.findIndex((p) => p.label === state.period);
+  const end = at >= 0 ? at + 1 : state.periods.length;
+  return state.periods.slice(Math.max(0, end - TREND_QUARTERS), end);
 }
 
-/** グラフの下に、四半期ごとの数値も並べる */
-function renderTrendTable(points, delta) {
+/**
+ * 棒の真下に数字が来るよう、グラフと同じ幅・同じ列割りで数値表を描く。
+ * layout はグラフ側の { left: 左余白, band: 1四半期の幅 }。
+ */
+function renderTrendTable(points, delta, layout) {
   const table = document.getElementById("trend-table");
   table.innerHTML = "";
-  if (points.length === 0) return;
+  if (points.length === 0 || !layout) { table.removeAttribute("style"); return; }
 
-  const head = el("tr", {}, el("th", { class: "label-col", scope: "col", text: "" }));
-  for (const p of points) head.append(el("th", { scope: "col", text: shortPeriod(p.period) }));
-  table.append(el("thead", {}, head));
+  table.style.tableLayout = "fixed";
+  table.style.width = `${layout.left + layout.band * points.length}px`;
+  const cg = document.createElement("colgroup");
+  const c0 = document.createElement("col");
+  c0.style.width = `${layout.left}px`;
+  cg.append(c0);
+  for (let i = 0; i < points.length; i++) {
+    const c = document.createElement("col");
+    c.style.width = `${layout.band}px`;
+    cg.append(c);
+  }
+  table.append(cg);
 
   const tbody = el("tbody");
   TREND_SERIES.forEach((s, si) => {
     const tr = el("tr", {});
     const label = el("th", { class: "label", scope: "row" });
-    label.append(el("span", { class: `swatch series-${s.cls}` }), s.label);
+    label.append(el("span", { class: `swatch series-${s.cls}` }), s.short || s.label);
     tr.append(label);
     for (const p of points) {
       const v = p.values[si];
@@ -505,26 +521,32 @@ function renderTrend() {
   const tooltip = document.getElementById("tr-tooltip");
   svg.innerHTML = "";
 
-  const { series, window: win } = trendWindow();
+  const delta = state.trendMode === "delta";
+  const win = trendWindow();
   const enough = win.length >= 2;
   document.getElementById("trend-empty").hidden = enough;
   document.getElementById("trend-count").textContent = `直近${win.length}四半期`;
-  if (!enough) { document.getElementById("trend-table").innerHTML = ""; return; }
+  if (!enough) { renderTrendTable([], delta, null); return; }
 
-  const delta = state.trendMode === "delta";
-  const valueAt = (d, key) => {
-    if (!delta) return d.metrics[key];
-    const i = series.indexOf(d);
-    const prev = i > 0 ? series[i - 1] : null;
-    return prev ? d.metrics[key] - prev.metrics[key] : null;
-  };
-
-  const points = win.map((d) => ({
-    period: d.period,
-    values: TREND_SERIES.map((s) => valueAt(d, s.key)),
-  }));
+  const points = win.map((p) => {
+    const gi = state.periods.indexOf(p);
+    const ds = state.byKey.get(keyOf(state.company, p.label));
+    const prev = gi > 0 ? state.byKey.get(keyOf(state.company, state.periods[gi - 1].label)) : null;
+    return {
+      period: p,
+      values: TREND_SERIES.map((s) => {
+        if (!ds) return null;
+        if (!delta) return ds.metrics[s.key];
+        return prev ? ds.metrics[s.key] - prev.metrics[s.key] : null;
+      }),
+    };
+  });
   const all = points.flatMap((p) => p.values).filter((v) => v !== null);
-  if (all.length === 0) { document.getElementById("trend-table").innerHTML = ""; return; }
+  if (all.length === 0) {
+    renderTrendTable([], delta, null);
+    document.getElementById("trend-empty").hidden = false;
+    return;
+  }
 
   const W = chartWidth(svg, 460, 1400), H = 300;
   const M = { top: 20, right: 16, bottom: 40, left: 84 };
@@ -573,7 +595,7 @@ function renderTrend() {
     });
   });
 
-  renderTrendTable(points, delta);
+  renderTrendTable(points, delta, { left: M.left, band });
 
   // ホバー: 縦のクロスヘアと、その四半期の全系列を出すツールチップ
   const crosshair = svgEl("line", { class: "crosshair", y1: M.top, y2: M.top + plotH, x1: 0, x2: 0 });
@@ -593,7 +615,8 @@ function renderTrend() {
         const row = el("div", { class: "tt-row" });
         row.append(
           el("span", { class: `tt-swatch series-${s.cls}` }),
-          el("span", { class: "tt-value", text: `${s.label}: ${delta ? fmtSigned(p.values[si]) : fmt(p.values[si])}` }),
+          el("span", { class: "tt-value",
+            text: `${s.label}: ${p.values[si] == null ? "—" : delta ? fmtSigned(p.values[si]) : fmt(p.values[si])}` }),
         );
         tooltip.append(row);
       });
