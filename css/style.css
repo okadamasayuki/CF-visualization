@@ -1,5 +1,7 @@
 /* ---- テーマトークン(ライト/ダーク) ---- */
 :root {
+  /* 画面の広さに合わせて本文の幅を決める(外部ディスプレイでも余白が余りすぎないように) */
+  --page-width: 1440px;
   color-scheme: light;
   --page: #f9f9f7;
   --surface-1: #fcfcfb;
@@ -67,10 +69,10 @@ body {
   line-height: 1.6;
 }
 
-main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
+main { max-width: var(--page-width); margin: 0 auto; padding: 0 20px 48px; }
 
 .site-header {
-  max-width: 1200px;
+  max-width: var(--page-width);
   margin: 0 auto;
   padding: 32px 20px 8px;
 }
@@ -78,7 +80,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 0 20px 48px; }
 .subtitle { color: var(--text-secondary); margin: 0; }
 
 .site-footer {
-  max-width: 1200px;
+  max-width: var(--page-width);
   margin: 0 auto;
   padding: 16px 20px 32px;
   color: var(--text-muted);
@@ -562,6 +564,10 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 }
 .btn-link:hover { opacity: 0.8; }
 
+/* 列の少ない表は、広い画面でも間延びしないよう幅を止める */
+#cf-body > .card:first-child { max-width: 780px; }
+#summary-card { max-width: 1040px; }
+
 /* ---- 会社別サマリー(会社ごとのカードを横に並べる) ---- */
 .company-grid {
   display: grid;
@@ -755,8 +761,8 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .chart-wrap { position: relative; width: 100%; overflow-x: auto; }
 /* 画面が狭いときは縮小せず横スクロールさせる(ラベルが読めなくなるため) */
-#waterfall { width: 100%; min-width: 600px; height: auto; display: block; }
-#overview-chart { width: 100%; min-width: 640px; display: block; }
+/* 幅・高さはJS側がコンテナ幅から等倍で決めるので、CSSでは伸縮させない */
+#waterfall, #overview-chart, #trend-chart { display: block; }
 
 .chart-wrap svg .grid-line { stroke: var(--grid); stroke-width: 1; }
 .chart-wrap svg .baseline { stroke: var(--baseline); stroke-width: 1; }
@@ -792,7 +798,8 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 /* ---- CF計算書 ---- */
 .statement-meta { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
-.statement { width: 100%; border-collapse: collapse; max-width: 640px; }
+/* 明細と金額の2列だけなので、広い画面でも読みやすい幅で止める */
+.statement { width: 100%; border-collapse: collapse; max-width: 720px; }
 .statement td {
   padding: 4px 8px;
   font-variant-numeric: tabular-nums;

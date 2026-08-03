@@ -370,6 +370,16 @@ function svgEl(tag, attrs = {}) {
   return node;
 }
 
+/**
+ * コンテナ幅に合わせて等倍(1単位 = 1px)で描くための幅を決める。
+ * viewBox で引き伸ばすと文字も線も一緒に拡大されてしまうため、
+ * 幅そのものを測ってから描く。
+ */
+function chartWidth(svg, min, max) {
+  const avail = (svg.parentElement && svg.parentElement.clientWidth) || min;
+  return Math.min(Math.max(Math.round(avail), min), max);
+}
+
 /** SVGテキストのおおよその幅(全角は1em、半角は約0.55em として見積もる) */
 function textWidth(text, fontSize) {
   let em = 0;
@@ -494,11 +504,13 @@ function renderTrend() {
   const all = points.flatMap((p) => p.values).filter((v) => v !== null);
   if (all.length === 0) return;
 
-  const W = 720, H = 300;
+  const W = chartWidth(svg, 640, 1400), H = 300;
   const M = { top: 20, right: 78, bottom: 40, left: 84 }; // 右は終点ラベルの分を空ける
   const plotW = W - M.left - M.right;
   const plotH = H - M.top - M.bottom;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
 
   const dataMin = Math.min(0, ...all);
   const dataMax = Math.max(0, ...all);
@@ -715,11 +727,12 @@ function renderOverviewChart() {
 
   const ROW = 22, BAR_H = 12;
   const M = { top: 28, right: 76, bottom: 8, left: 132 };
-  const W = 720;
+  const W = chartWidth(svg, 640, 1200);
   const plotW = W - M.left - M.right;
   const plotH = items.length * ROW;
   const H = M.top + plotH + M.bottom;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
   svg.setAttribute("height", H);
 
   const values = items.map((i) => i.value);
@@ -1013,11 +1026,13 @@ function renderWaterfall(cf) {
     else { s.from = cum; s.to = cum + s.value; cum = s.to; }
   }
 
-  const W = 720, H = 340;
+  const W = chartWidth(svg, 600, 900), H = 340;
   const M = { top: 20, right: 16, bottom: 34, left: 76 };
   const plotW = W - M.left - M.right;
   const plotH = H - M.top - M.bottom;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
 
   let lo = Math.min(0, ...steps.map((s) => Math.min(s.from, s.to)));
   let hi = Math.max(0, ...steps.map((s) => Math.max(s.from, s.to)));
@@ -1845,6 +1860,11 @@ function selectTab(id) {
   if (id === "overview") { renderOverviewChart(); renderOverviewCards(); }
   if (id === "logic") renderDerivation();
   if (id === "detail") renderDetailPanel();
+  // グラフは表示されてから幅を測る(隠れている間は幅が0のため)
+  if (id === "cf") {
+    const ds = currentDataset();
+    if (ds && ds.cf) renderWaterfall(ds.cf);
+  }
 }
 
 function renderTabs() {
@@ -2572,7 +2592,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeTimer = null;
+      // グラフはコンテナ幅に合わせて等倍で描いているので、幅が変わったら描き直す
       if (!document.getElementById("panel-logic").hidden) renderDerivationDiagram();
+      if (!document.getElementById("panel-trend").hidden) renderTrend();
+      if (!document.getElementById("panel-overview").hidden) renderOverviewChart();
+      const cf = currentDataset();
+      if (!document.getElementById("panel-cf").hidden && cf && cf.cf) renderWaterfall(cf.cf);
     }, 120);
   });
 
