@@ -83,6 +83,8 @@ const SCHEMA = {
       aliases: ["長期借入による収入", "長期借入金の借入による収入"] },
     { key: "longLoanRepayment", label: "長期借入金の返済による支出", absolute: true, group: "総額表示",
       aliases: ["長期借入の返済による支出"] },
+    { key: "capex", label: "固定資産の取得による支出(実額)", absolute: true, group: "設備投資",
+      aliases: ["設備投資額", "設備投資の実績", "固定資産取得支出", "有形固定資産の取得による支出"] },
     { key: "impairment", label: "減損損失", absolute: true, group: "非資金項目",
       aliases: ["減損損失額", "固定資産減損損失"] },
     { key: "retirement", label: "固定資産除却損(除却簿価)", absolute: true, group: "非資金項目",

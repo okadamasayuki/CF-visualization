@@ -116,7 +116,10 @@ const DERIVATION = [
         ],
         note: "Δ有形固定資産 = 取得 − 減価償却費 − 売却簿価 の関係を取得について解いています(売却簿価 = 売却収入 − 売却損益)。",
         assumption: "残高差からの逆算なので、除却・減損・リース取得もこの行に混ざります。詳細情報を入れると分離できます。",
-        detailVariant: {
+        detailVariants: [{
+          requires: ["capex"],
+          inputs: [{ path: "detail.capex", sign: -1 }],
+        }, {
           requires: ["impairment", "retirement", "leaseAcquisition"],
           inputs: [
             { path: "bs.curr.tangible", sign: -1 }, { path: "bs.prev.tangible", sign: 1 },
@@ -125,7 +128,7 @@ const DERIVATION = [
             { path: "detail.impairment", sign: -1 }, { path: "detail.retirement", sign: -1 },
             { path: "detail.leaseAcquisition", sign: 1 },
           ],
-        },
+        }],
       },
       { labels: ["固定資産の売却による収入"], inputs: [{ path: "sup.saleProceeds", sign: 1 }],
         note: "3表の外から受け取る入力です。この値を変えても3区分の合計は変わらず、取得支出との内訳表示だけが動きます。" },

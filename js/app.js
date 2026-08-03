@@ -227,10 +227,23 @@ function computeCF(data, provided = new Set(), policy = INTEREST_POLICY_DEFAULT)
   const bookValueSold = sup.saleProceeds - pl.gainOnSale;
   const tangibleAcquired = d("tangible") + pl.depreciation + bookValueSold
     + impairment + retirement - lease;
+  // 設備投資の実額(計画・実績)があればそれを使う。BSからの逆算との差は
+  // 未払金による取得・非資金の取得などなので「その他の投資」に含め、
+  // 投資CFの合計と増減額は変えない
+  let capexOutflow = tangibleAcquired;
+  let capexGap = 0;
+  if (has("capex")) {
+    used.push("capex");
+    capexOutflow = val("capex");
+    capexGap = tangibleAcquired - capexOutflow;
+    if (Math.abs(capexGap) >= 0.5) {
+      notes.push(`固定資産の取得による支出の実額 ${fmt(capexOutflow)} と、BSからの逆算 ${fmt(tangibleAcquired)} に差があります。差額 ${fmt(capexGap)} は「その他の投資」に含めています(未払金による取得・非資金の取得などが考えられます)。`);
+    }
+  }
   // その他の投資 = 投資その他の資産 + 預け金 + 現金同等物に含めない預金 の増減(すべて純額)
-  const otherInvesting = -(d("investments") + d("deposits") + d("cashExcluded"));
+  const otherInvesting = -(d("investments") + d("deposits") + d("cashExcluded")) - capexGap;
   const investingItems = [
-    { label: "固定資産の取得による支出", value: -tangibleAcquired },
+    { label: "固定資産の取得による支出", value: -capexOutflow, detailed: has("capex") },
     { label: "固定資産の売却による収入", value: sup.saleProceeds },
     { label: "その他の投資", value: otherInvesting },
   ];
@@ -1154,8 +1167,9 @@ function valueAtPath(data, path) {
 
 /** 詳細情報が入っていればそちらの入力定義を使う */
 function activeInputs(item, provided) {
-  if (item.detailVariant && item.detailVariant.requires.every((k) => provided.has(`detail:${k}`))) {
-    return item.detailVariant.inputs;
+  const variants = item.detailVariants || (item.detailVariant ? [item.detailVariant] : []);
+  for (const v of variants) {
+    if (v.requires.every((k) => provided.has(`detail:${k}`))) return v.inputs;
   }
   return item.inputs || [];
 }
@@ -1172,8 +1186,7 @@ function renderDerivationDiagram() {
   const provided = ds ? ds.provided : new Set();
   const inputs = activeInputs(item, provided);
 
-  document.getElementById("deriv-detail-note").hidden =
-    !(item.detailVariant && inputs === item.detailVariant.inputs);
+  document.getElementById("deriv-detail-note").hidden = inputs === (item.inputs || []);
 
   const rows = item.computed ? [] : inputs;
   const ROW = 44, TOP = 56;
@@ -1362,9 +1375,11 @@ function renderDerivationList() {
       row.append(el("div", { class: "deriv-name", text: item.labels.join(" / ") }));
       row.append(formulaFor(item.inputs, item.computed));
 
-      if (item.detailVariant) {
-        row.append(el("p", { class: "deriv-note", text: "詳細情報を入力した場合:" }));
-        const alt = formulaFor(item.detailVariant.inputs, null);
+      const variants = item.detailVariants || (item.detailVariant ? [item.detailVariant] : []);
+      for (const v of variants) {
+        row.append(el("p", { class: "deriv-note", text:
+          `詳細情報(${v.requires.map((k) => DISPLAY_FIELDS.detail.find((f) => f.key === k).label).join("、")})を入力した場合:` }));
+        const alt = formulaFor(v.inputs, null);
         alt.classList.add("is-variant");
         row.append(alt);
       }
