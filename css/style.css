@@ -562,6 +562,30 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 }
 .btn-link:hover { opacity: 0.8; }
 
+/* ---- 選んだ会社×四半期のデータがないときの案内 ---- */
+.missing-notice {
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  background: var(--surface-1);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.missing-title { margin: 0; font-weight: 600; }
+.missing-sub { margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); }
+.missing-list { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 4px; vertical-align: middle; }
+.period-chip {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--page);
+  border: 1px solid var(--grid);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.period-chip:hover { border-color: var(--accent); }
+.period-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* ---- 共有フォルダ ---- */
 .share-path {
   margin: 12px 0 10px;

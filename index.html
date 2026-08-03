@@ -152,7 +152,11 @@
 
     <!-- ===== サマリー ===== -->
     <section id="panel-summary" class="panel" role="tabpanel" aria-labelledby="tab-summary" tabindex="0">
-      <div class="card">
+      <div class="missing-notice" id="summary-missing" hidden>
+        <p class="missing-title"></p>
+        <p class="missing-sub">この会社のデータがある四半期:<span class="missing-list"></span></p>
+      </div>
+      <div class="card" id="summary-card">
         <div class="chart-head">
           <h3>財務指標 <span id="metrics-subject" class="count-badge"></span></h3>
           <span id="metrics-yoy-label" class="table-hint"></span>
@@ -190,27 +194,19 @@
 
     <!-- ===== CF計算書 ===== -->
     <section id="panel-cf" class="panel" role="tabpanel" aria-labelledby="tab-cf" tabindex="0" hidden>
+      <div class="missing-notice" id="cf-missing" hidden>
+        <p class="missing-title"></p>
+        <p class="missing-sub">この会社のデータがある四半期:<span class="missing-list"></span></p>
+      </div>
+
       <div id="cf-unavailable" class="empty-state" hidden>
         <p>この四半期は期首のBSがないため、CF計算書を作成できません。</p>
         <p class="empty-sub">前の四半期のデータを追加するか、CSVに「前期末」列を入力してください。</p>
       </div>
 
       <div id="cf-body">
-        <div class="card chart-card">
-          <h3>キャッシュ・フローの推移 <span id="statement-subject" class="count-badge"></span></h3>
-          <div class="legend">
-            <span class="legend-item"><span class="swatch swatch-total"></span>残高</span>
-            <span class="legend-item"><span class="swatch swatch-pos"></span>増加</span>
-            <span class="legend-item"><span class="swatch swatch-neg"></span>減少</span>
-          </div>
-          <div class="chart-wrap">
-            <svg id="waterfall" role="img" aria-label="期首残高から営業・投資・財務活動によるキャッシュ・フローを経て期末残高に至るウォーターフォールチャート"></svg>
-            <div id="wf-tooltip" class="tooltip" hidden></div>
-          </div>
-        </div>
-
         <div class="card">
-          <h3>キャッシュ・フロー計算書(間接法)</h3>
+          <h3>キャッシュ・フロー計算書(間接法) <span id="statement-subject" class="count-badge"></span></h3>
           <table class="statement" id="cf-statement"></table>
           <details class="assumptions">
             <summary>計算上の前提(簡便法)</summary>
@@ -222,6 +218,19 @@
               <li>現金及び現金同等物はBSの「現金及び預金」と一致するものとしています。</li>
             </ul>
           </details>
+        </div>
+
+        <div class="card chart-card">
+          <h3>キャッシュ・フローの推移</h3>
+          <div class="legend">
+            <span class="legend-item"><span class="swatch swatch-total"></span>残高</span>
+            <span class="legend-item"><span class="swatch swatch-pos"></span>増加</span>
+            <span class="legend-item"><span class="swatch swatch-neg"></span>減少</span>
+          </div>
+          <div class="chart-wrap">
+            <svg id="waterfall" role="img" aria-label="期首残高から営業・投資・財務活動によるキャッシュ・フローを経て期末残高に至るウォーターフォールチャート"></svg>
+            <div id="wf-tooltip" class="tooltip" hidden></div>
+          </div>
         </div>
       </div>
 
@@ -289,7 +298,11 @@
     <!-- ===== 算定ロジック ===== -->
     <!-- ===== 詳細入力 ===== -->
     <section id="panel-detail" class="panel" role="tabpanel" aria-labelledby="tab-detail" tabindex="0" hidden>
-      <div class="card">
+      <div class="missing-notice" id="detail-missing" hidden>
+        <p class="missing-title"></p>
+        <p class="missing-sub">この会社のデータがある四半期:<span class="missing-list"></span></p>
+      </div>
+      <div class="card" id="detail-card">
         <h3>詳細情報を入れて精度を上げる <span id="detail-subject" class="count-badge"></span></h3>
         <p class="table-hint">
           BS・PL・SSから読み取れない情報を補うと、簡便法の仮定を減らせます。

@@ -1509,6 +1509,7 @@ function renderPolicyPicker() {
 }
 
 function renderDetailPanel() {
+  renderMissingNotice();
   const ds = currentDataset();
   document.getElementById("detail-subject").textContent = ds ? `${ds.company} / ${ds.period.label}` : "";
   renderPolicyPicker();
@@ -1827,26 +1828,70 @@ function renderSelectors() {
     state.companies.length <= 1 && state.periods.length <= 1;
 }
 
+/**
+ * 選んだ会社にその四半期のデータがないときの案内。
+ * 勝手に別の会社へ切り替えず、無いことをはっきり伝えて、
+ * その会社が持っている四半期へ移れるようにする。
+ */
+function renderMissingNotice() {
+  const missing = hasData() && !currentDataset();
+  const labels = (state.byCompany.get(state.company) || []).map((d) => d.period.label);
+
+  for (const id of ["summary-missing", "cf-missing", "detail-missing"]) {
+    const box = document.getElementById(id);
+    box.hidden = !missing;
+    if (!missing) continue;
+    box.querySelector(".missing-title").textContent =
+      `${state.company} の ${state.period} は読み込まれていないため、表示できません。`;
+    const list = box.querySelector(".missing-list");
+    list.innerHTML = "";
+    if (labels.length === 0) { list.textContent = "なし"; continue; }
+    for (const label of labels) {
+      const chip = el("button", { type: "button", class: "period-chip", text: label });
+      chip.addEventListener("click", () => {
+        state.period = label;
+        document.getElementById("period-select").value = label;
+        state.dataLimit = 200;
+        state.dataAuto = true;
+        renderAll();
+        if (state.tab === "data") renderData();
+      });
+      list.append(chip);
+    }
+  }
+  document.getElementById("summary-card").hidden = missing;
+  document.getElementById("detail-card").hidden = missing;
+  return missing;
+}
+
 function renderAll() {
   const dataset = currentDataset();
   const multi = state.companies.length > 1;
 
   document.getElementById("btn-clear").hidden = false;
-  document.getElementById("btn-export").hidden = !dataset;
-  if (!dataset) { renderChecks([]); renderTabs(); return; }
+  document.getElementById("btn-export").hidden = !hasData();
+  renderMissingNotice();
 
-  renderMetrics();
-  renderChecks(dataset.checks);
-  renderTrend();
+  // 会社別の推移と全社比較は、選択の片方が欠けていても意味があるので描く
+  if (hasData()) renderTrend();
 
-  document.getElementById("statement-subject").textContent =
-    `${dataset.company} / ${dataset.period.label}`;
-  const hasCF = !!dataset.cf;
-  document.getElementById("cf-body").hidden = !hasCF;
-  document.getElementById("cf-unavailable").hidden = hasCF;
-  if (hasCF) {
-    renderStatement(dataset.cf);
-    renderWaterfall(dataset.cf);
+  if (!dataset) {
+    renderChecks([]);
+    document.getElementById("cf-body").hidden = true;
+    document.getElementById("cf-unavailable").hidden = true;
+  } else {
+    renderMetrics();
+    renderChecks(dataset.checks);
+
+    document.getElementById("statement-subject").textContent =
+      `${dataset.company} / ${dataset.period.label}`;
+    const hasCF = !!dataset.cf;
+    document.getElementById("cf-body").hidden = !hasCF;
+    document.getElementById("cf-unavailable").hidden = hasCF;
+    if (hasCF) {
+      renderStatement(dataset.cf);
+      renderWaterfall(dataset.cf);
+    }
   }
 
   if (multi) {
@@ -2412,11 +2457,8 @@ document.addEventListener("DOMContentLoaded", () => {
     state.period = ev.target.value;
     state.dataLimit = 200;
     state.dataAuto = true;
-    // 選んだ四半期にその会社のデータがなければ、ある会社へ寄せる
-    if (!state.byKey.has(keyOf(state.company, state.period))) {
-      const fallback = state.companies.find((c) => state.byKey.has(keyOf(c, state.period)));
-      if (fallback) { state.company = fallback; document.getElementById("company-select").value = fallback; }
-    }
+    // その会社にデータがない四半期でも、勝手に別の会社へ切り替えない。
+    // 代わりに renderAll が「このデータは入っていません」と案内する。
     renderAll();
     if (state.tab === "data") renderData();
   });
