@@ -31,6 +31,11 @@ jobs:
         with:
           enablement: true
 
+      # CSS/JS の参照にコミットIDを付け、更新後に古いキャッシュが使われないようにする
+      # (ローカルで file:// や python -m http.server で開く場合は __BUILD__ のままでも動く)
+      - name: Stamp asset version
+        run: sed -i "s/__BUILD__/${GITHUB_SHA::8}/g" index.html
+
       # ビルド不要の静的サイトなので、リポジトリ全体をそのまま公開する
       - uses: actions/upload-pages-artifact@v3
         with:
