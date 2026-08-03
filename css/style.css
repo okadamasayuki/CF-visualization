@@ -566,16 +566,13 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   .summary-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* 棒の真下に数字を置く数値表(幅と列割りはJSがグラフに合わせる) */
-.trend-table { border-collapse: collapse; font-size: 11.5px; margin-top: 2px; }
-.trend-table th, .trend-table td { padding: 3px 2px; white-space: nowrap; overflow: hidden; }
-.trend-table tbody th.label {
-  font-weight: 400;
-  color: var(--text-secondary);
-  text-align: left;
+/* 棒の真下の数値(SVG内に描くので棒と必ず中心が揃う)。系列は左端の色の四角で示す */
+.chart-wrap svg .trend-num {
+  fill: var(--text-primary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
-.trend-table tbody th.label .swatch { margin-right: 5px; }
-.trend-table td.num { text-align: center; font-variant-numeric: tabular-nums; }
+.chart-wrap svg .trend-num.muted { fill: var(--text-muted); }
 
 /* ---- 会社別サマリー(会社ごとのカードを横に並べる) ---- */
 .company-grid {

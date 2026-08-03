@@ -476,46 +476,6 @@ function trendWindow() {
   return state.periods.slice(Math.max(0, end - TREND_QUARTERS), end);
 }
 
-/**
- * 棒の真下に数字が来るよう、グラフと同じ幅・同じ列割りで数値表を描く。
- * layout はグラフ側の { left: 左余白, band: 1四半期の幅 }。
- */
-function renderTrendTable(points, delta, layout) {
-  const table = document.getElementById("trend-table");
-  table.innerHTML = "";
-  if (points.length === 0 || !layout) { table.removeAttribute("style"); return; }
-
-  table.style.tableLayout = "fixed";
-  table.style.width = `${layout.left + layout.band * points.length}px`;
-  const cg = document.createElement("colgroup");
-  const c0 = document.createElement("col");
-  c0.style.width = `${layout.left}px`;
-  cg.append(c0);
-  for (let i = 0; i < points.length; i++) {
-    const c = document.createElement("col");
-    c.style.width = `${layout.band}px`;
-    cg.append(c);
-  }
-  table.append(cg);
-
-  const tbody = el("tbody");
-  TREND_SERIES.forEach((s, si) => {
-    const tr = el("tr", {});
-    const label = el("th", { class: "label", scope: "row" });
-    label.append(el("span", { class: `swatch series-${s.cls}` }), s.short || s.label);
-    tr.append(label);
-    for (const p of points) {
-      const v = p.values[si];
-      tr.append(el("td", {
-        class: "num",
-        text: v === null || v === undefined ? "—" : delta ? fmtSigned(v) : fmt(v),
-      }));
-    }
-    tbody.append(tr);
-  });
-  table.append(tbody);
-}
-
 function renderTrend() {
   const svg = document.getElementById("trend-chart");
   const tooltip = document.getElementById("tr-tooltip");
@@ -526,7 +486,7 @@ function renderTrend() {
   const enough = win.length >= 2;
   document.getElementById("trend-empty").hidden = enough;
   document.getElementById("trend-count").textContent = `直近${win.length}四半期`;
-  if (!enough) { renderTrendTable([], delta, null); return; }
+  if (!enough) return;
 
   const points = win.map((p) => {
     const gi = state.periods.indexOf(p);
@@ -543,13 +503,14 @@ function renderTrend() {
   });
   const all = points.flatMap((p) => p.values).filter((v) => v !== null);
   if (all.length === 0) {
-    renderTrendTable([], delta, null);
     document.getElementById("trend-empty").hidden = false;
     return;
   }
 
-  const W = chartWidth(svg, 460, 1400), H = 300;
-  const M = { top: 20, right: 16, bottom: 40, left: 84 };
+  // 下に系列ごとの数値2行を、同じ座標系で描き込む(ズレようがない)
+  const VROW = 17;
+  const W = chartWidth(svg, 460, 1400), H = 300 + 2 * VROW + 6;
+  const M = { top: 20, right: 16, bottom: 40 + 2 * VROW + 6, left: 84 };
   const plotW = W - M.left - M.right;
   const plotH = H - M.top - M.bottom;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
@@ -576,10 +537,29 @@ function renderTrend() {
     svg.append(lbl);
   }
 
+  const catY = M.top + plotH + 26;
   points.forEach((p, i) => {
-    const lbl = svgEl("text", { class: "cat-label", x: cx(i), y: H - 14, "text-anchor": "middle" });
+    const lbl = svgEl("text", { class: "cat-label", x: cx(i), y: catY, "text-anchor": "middle" });
     lbl.textContent = shortPeriod(p.period);
     svg.append(lbl);
+  });
+
+  // --- 各棒の真下に数値。行の左端は色の四角だけで系列を示す ---
+  TREND_SERIES.forEach((s2, si) => {
+    const rowY = catY + 19 + si * VROW;
+    svg.append(svgEl("rect", {
+      class: `bar series-${s2.cls} trend-row-swatch`,
+      x: 10, y: rowY - 8.5, width: 10, height: 10, rx: 2,
+    }));
+    points.forEach((p, i) => {
+      const v = p.values[si];
+      const t = svgEl("text", {
+        class: `trend-num${v === null || v === undefined ? " muted" : ""}`,
+        x: cx(i), y: rowY, "text-anchor": "middle",
+      });
+      t.textContent = v === null || v === undefined ? "—" : delta ? fmtSigned(v) : fmt(v);
+      svg.append(t);
+    });
   });
 
   // 残高・前四半期差とも、0を基準にした縦棒で表す(2系列を隣り合わせる)
@@ -594,8 +574,6 @@ function renderTrend() {
       }));
     });
   });
-
-  renderTrendTable(points, delta, { left: M.left, band });
 
   // ホバー: 縦のクロスヘアと、その四半期の全系列を出すツールチップ
   const crosshair = svgEl("line", { class: "crosshair", y1: M.top, y2: M.top + plotH, x1: 0, x2: 0 });
