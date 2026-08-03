@@ -207,8 +207,14 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   gap: 4px;
   margin: 20px 0 0;
   border-bottom: 1px solid var(--grid);
+  /* 狭い画面では横にスクロールできるが、スクロールバーは表示しない。
+     タブが下端から1pxはみ出す作り(選択線を境界線に重ねるため)なので、
+     縦のはみ出しは隠さないとWindowsで極小のスクロールバーが出てしまう */
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   font: inherit;
   font-size: 13px;
