@@ -492,17 +492,27 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
 .tooltip .tt-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 
+/* 行ホバーの説明(算定式 + 注記)。長文は折り返す */
+.tooltip .tt-formula { max-width: 360px; white-space: normal; }
+.tooltip .tt-formula .tt-title { font-weight: 700; margin-bottom: 4px; }
+.tooltip .tt-formula .deriv-formula { margin: 2px 0; }
+.tooltip .tt-note {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+/* 説明を持つ行は、かざせることが分かるようにする */
+tr.has-note { cursor: help; }
+.statement tr.has-note:hover td, .metrics-table tr.has-note:hover td { background: var(--accent-wash); }
+
+/* ツールチップの基準になるカード */
+#cf-body, #summary-card { position: relative; }
+
 /* ---- 財務指標テーブル ---- */
 .metrics-table { width: 100%; }
 .metrics-table td.label { line-height: 1.4; }
-.metrics-table .metric-note {
-  display: block;
-  font-size: 11px;
-  color: var(--text-muted);
-}
 .metrics-table td.num { width: 92px; }
-/* 指標名の注記(算式)は列幅を圧迫しないよう、200pxで折り返す */
-.metrics-table .metric-note { white-space: normal; max-width: 200px; }
 .metrics-table td.muted { color: var(--text-muted); }
 .metrics-table td.up { color: var(--good); }
 .metrics-table td.down { color: var(--bad); }

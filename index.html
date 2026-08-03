@@ -61,7 +61,9 @@
         <!-- 左:CF計算書 -->
         <div class="card" id="cf-body">
           <h3>キャッシュ・フロー計算書(間接法) <span id="statement-subject" class="count-badge"></span></h3>
+          <p class="table-hint">行にカーソルを合わせると、その行の算定式と補足が出ます。</p>
           <table class="statement" id="cf-statement"></table>
+          <div id="st-tooltip" class="tooltip" hidden></div>
           <details class="assumptions">
             <summary>計算上の前提(簡便法)</summary>
             <ul>
@@ -84,6 +86,7 @@
             <div class="table-scroll">
               <table class="data-table metrics-table" id="metrics-table"></table>
             </div>
+            <div id="mt-tooltip" class="tooltip" hidden></div>
             <p id="metrics-estimate-note" class="hint" hidden>
               ※ 営業利益がCSVにないため「税引前当期純利益 + 支払利息 − 受取利息」で推計しています。EBITDAとROICもこの推計値に基づきます。
             </p>

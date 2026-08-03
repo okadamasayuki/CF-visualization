@@ -446,6 +446,40 @@ function vBarPath(x, w, yBase, yValue, r = 4) {
   return `M${x},${yBase} L${x + w},${yBase} L${x + w},${yValue - rr} Q${x + w},${yValue} ${x + w - rr},${yValue} L${x + rr},${yValue} Q${x},${yValue} ${x},${yValue - rr} Z`;
 }
 
+/* 表の行にかざしたときの説明ツールチップ(サマリーのCF計算書・財務指標で使う) */
+
+/** ラベル → 算定ロジックの項目 の索引 */
+const DERIVATION_BY_LABEL = new Map();
+for (const sec of DERIVATION) {
+  for (const item of sec.items) {
+    for (const l of item.labels) DERIVATION_BY_LABEL.set(l, item);
+  }
+}
+
+/** 行の直下にツールチップを出す(container は position:relative の要素) */
+function showRowTooltip(tooltip, container, ev, content) {
+  tooltip.innerHTML = "";
+  tooltip.append(content);
+  tooltip.hidden = false;
+  const rect = container.getBoundingClientRect();
+  const tx = Math.min(ev.clientX - rect.left + 14, rect.width - tooltip.offsetWidth - 8);
+  tooltip.style.left = `${Math.max(8, tx)}px`;
+  tooltip.style.top = `${ev.clientY - rect.top + 18}px`;
+}
+
+/** 行にホバー(スマホではタップ)で説明を出す */
+function bindRowTooltip(tr, tooltip, container, buildContent) {
+  const move = (ev) => {
+    const content = buildContent();
+    if (!content) return;
+    showRowTooltip(tooltip, container, ev, content);
+  };
+  tr.classList.add("has-note");
+  tr.addEventListener("mousemove", move);
+  tr.addEventListener("click", move);
+  tr.addEventListener("mouseleave", () => { tooltip.hidden = true; });
+}
+
 function positionTooltip(tooltip, svg, ev) {
   const wrapEl = svg.parentElement;
   const wrap = wrapEl.getBoundingClientRect();
@@ -655,15 +689,26 @@ function renderMetrics() {
 
     const label = el("td", { class: "label" });
     label.append(row.label);
-    if (row.note) label.append(el("span", { class: "metric-note", text: row.note }));
+    // 算式はかざしたときの補足として出す(常時は表示しない)
+    const noteLines = [];
+    if (row.note) noteLines.push(row.note);
     if (row.key === "roic" && dataset.metrics.roicBasis) {
-      label.append(el("span", { class: "metric-note", text: `年換算: ${dataset.metrics.roicBasis}` }));
+      noteLines.push(`年換算: ${dataset.metrics.roicBasis}`);
     }
 
     const tr = el("tr", {}, label,
       el("td", { class: "num", text: fmtBy(row.kind, cur) }),
       el("td", { class: "num muted", text: fmtBy(row.kind, old) }),
     );
+    if (noteLines.length) {
+      bindRowTooltip(tr, document.getElementById("mt-tooltip"),
+        document.getElementById("summary-card"), () => {
+          const wrap = el("div", { class: "tt-formula" });
+          wrap.append(el("div", { class: "tt-title", text: row.label }));
+          for (const n of noteLines) wrap.append(el("div", { class: "tt-note", text: n }));
+          return wrap;
+        });
+    }
 
     // 比率はポイント差、金額は差額と変化率で見せる
     let diff = null, rate = null;
@@ -956,9 +1001,38 @@ function renderOverviewCards() {
  * CF計算書とウォーターフォール
  * ======================================================= */
 
+/** CF計算書の行の説明(算定式 + 注記)。説明がない行は null */
+function statementTooltipContent(label) {
+  const bare = label.replace(/^[ⅠⅡⅢⅣⅤⅥⅦ]\s*/, "");
+  const wrap = el("div", { class: "tt-formula" });
+  wrap.append(el("div", { class: "tt-title", text: bare }));
+
+  const totals = {
+    "営業活動によるキャッシュ・フロー 合計": "Ⅰ 営業活動の各行をすべて足した合計です。",
+    "投資活動によるキャッシュ・フロー 合計": "Ⅱ 投資活動の各行をすべて足した合計です。",
+    "財務活動によるキャッシュ・フロー 合計": "Ⅲ 財務活動の各行をすべて足した合計です。",
+  };
+  if (totals[bare]) {
+    wrap.append(el("div", { class: "tt-note", text: totals[bare] }));
+    return wrap;
+  }
+
+  const item = DERIVATION_BY_LABEL.get(bare);
+  if (!item) return null;
+  const ds = currentDataset();
+  const provided = ds ? ds.provided : new Set();
+  wrap.append(formulaFor(activeInputs(item, provided), item.computed));
+  if (item.note) wrap.append(el("div", { class: "tt-note", text: item.note }));
+  if (item.assumption) wrap.append(el("div", { class: "tt-note", text: `簡便法の仮定: ${item.assumption}` }));
+  return wrap;
+}
+
 function renderStatement(cf) {
   const table = document.getElementById("cf-statement");
   table.innerHTML = "";
+  const tooltip = document.getElementById("st-tooltip");
+  const container = document.getElementById("cf-body");
+  tooltip.hidden = true;
 
   const row = (cls, label, value) => {
     const tr = el("tr", { class: cls });
@@ -966,6 +1040,10 @@ function renderStatement(cf) {
     const td = el("td", { class: "amount" });
     if (value !== null) td.textContent = fmt(value);
     tr.append(td);
+    // かざすと算定式と説明が出る(説明のない見出し行などは何もしない)
+    if (statementTooltipContent(label)) {
+      bindRowTooltip(tr, tooltip, container, () => statementTooltipContent(label));
+    }
     table.append(tr);
   };
   // 項目構成を確認できるよう、金額が0の行も省略せず表示する
@@ -974,6 +1052,9 @@ function renderStatement(cf) {
       const tr = el("tr", { class: Math.abs(i.value) < 0.005 ? "item is-zero" : "item" });
       tr.append(el("td", { text: i.label }));
       tr.append(el("td", { class: "amount", text: fmt(i.value) }));
+      if (statementTooltipContent(i.label)) {
+        bindRowTooltip(tr, tooltip, container, () => statementTooltipContent(i.label));
+      }
       table.append(tr);
     }
   };
