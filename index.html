@@ -31,14 +31,8 @@
               aria-controls="panel-source" aria-selected="true" tabindex="0">読み込み</button>
       <button type="button" class="tab" role="tab" id="tab-summary" data-tab="summary"
               aria-controls="panel-summary" aria-selected="false" tabindex="-1">サマリー</button>
-      <button type="button" class="tab" role="tab" id="tab-trend" data-tab="trend"
-              aria-controls="panel-trend" aria-selected="false" tabindex="-1">推移</button>
-      <button type="button" class="tab" role="tab" id="tab-cf" data-tab="cf"
-              aria-controls="panel-cf" aria-selected="false" tabindex="-1">CF計算書</button>
       <button type="button" class="tab" role="tab" id="tab-overview" data-tab="overview"
               aria-controls="panel-overview" aria-selected="false" tabindex="-1">全社比較</button>
-      <button type="button" class="tab" role="tab" id="tab-data" data-tab="data"
-              aria-controls="panel-data" aria-selected="false" tabindex="-1">データ</button>
       <button type="button" class="tab" role="tab" id="tab-detail" data-tab="detail"
               aria-controls="panel-detail" aria-selected="false" tabindex="-1">詳細入力</button>
       <button type="button" class="tab" role="tab" id="tab-logic" data-tab="logic"
@@ -156,56 +150,15 @@
         <p class="missing-title"></p>
         <p class="missing-sub">この会社のデータがある四半期:<span class="missing-list"></span></p>
       </div>
-      <div class="card" id="summary-card">
-        <div class="chart-head">
-          <h3>財務指標 <span id="metrics-subject" class="count-badge"></span></h3>
-          <span id="metrics-yoy-label" class="table-hint"></span>
-        </div>
-        <div class="table-scroll">
-          <table class="data-table metrics-table" id="metrics-table"></table>
-        </div>
-        <p id="metrics-estimate-note" class="hint" hidden>
-          ※ 営業利益がCSVにないため「税引前当期純利益 + 支払利息 − 受取利息」で推計しています。EBITDAとROICもこの推計値に基づきます。
-        </p>
-      </div>
-    </section>
-
-    <!-- ===== 預け金・借入金の推移 ===== -->
-    <section id="panel-trend" class="panel" role="tabpanel" aria-labelledby="tab-trend" tabindex="0" hidden>
-      <div class="card chart-card">
-        <div class="chart-head">
-          <h3>預け金・借入金の推移 <span id="trend-count" class="count-badge"></span></h3>
-          <div class="mode-toggle" role="radiogroup" aria-label="表示する値">
-            <label><input type="radio" name="trend-mode" value="balance" checked> 残高</label>
-            <label><input type="radio" name="trend-mode" value="delta"> 前四半期差</label>
-          </div>
-        </div>
-        <div class="legend">
-          <span class="legend-item"><span class="swatch series-s1"></span>預け金</span>
-          <span class="legend-item"><span class="swatch series-s2"></span>借入金(有利子負債)</span>
-        </div>
-        <div class="chart-wrap">
-          <svg id="trend-chart" role="img" aria-label="選択中の会社の預け金と借入金の四半期推移"></svg>
-          <div id="tr-tooltip" class="tooltip" hidden></div>
-        </div>
-        <p id="trend-empty" class="hint" hidden>推移を描くには、同じ会社で2四半期以上のデータが必要です。</p>
-      </div>
-    </section>
-
-    <!-- ===== CF計算書 ===== -->
-    <section id="panel-cf" class="panel" role="tabpanel" aria-labelledby="tab-cf" tabindex="0" hidden>
-      <div class="missing-notice" id="cf-missing" hidden>
-        <p class="missing-title"></p>
-        <p class="missing-sub">この会社のデータがある四半期:<span class="missing-list"></span></p>
-      </div>
 
       <div id="cf-unavailable" class="empty-state" hidden>
         <p>この四半期は期首のBSがないため、CF計算書を作成できません。</p>
         <p class="empty-sub">前の四半期のデータを追加するか、CSVに「前期末」列を入力してください。</p>
       </div>
 
-      <div id="cf-body">
-        <div class="card">
+      <div class="summary-grid" id="summary-body">
+        <!-- 左:CF計算書 -->
+        <div class="card" id="cf-body">
           <h3>キャッシュ・フロー計算書(間接法) <span id="statement-subject" class="count-badge"></span></h3>
           <table class="statement" id="cf-statement"></table>
           <details class="assumptions">
@@ -220,16 +173,41 @@
           </details>
         </div>
 
-        <div class="card chart-card">
-          <h3>キャッシュ・フローの推移</h3>
-          <div class="legend">
-            <span class="legend-item"><span class="swatch swatch-total"></span>残高</span>
-            <span class="legend-item"><span class="swatch swatch-pos"></span>増加</span>
-            <span class="legend-item"><span class="swatch swatch-neg"></span>減少</span>
+        <!-- 右:上に財務指標、下に預け金・借入金の推移 -->
+        <div class="summary-side">
+          <div class="card" id="summary-card">
+            <div class="chart-head">
+              <h3>財務指標 <span id="metrics-subject" class="count-badge"></span></h3>
+              <span id="metrics-yoy-label" class="table-hint"></span>
+            </div>
+            <div class="table-scroll">
+              <table class="data-table metrics-table" id="metrics-table"></table>
+            </div>
+            <p id="metrics-estimate-note" class="hint" hidden>
+              ※ 営業利益がCSVにないため「税引前当期純利益 + 支払利息 − 受取利息」で推計しています。EBITDAとROICもこの推計値に基づきます。
+            </p>
           </div>
-          <div class="chart-wrap">
-            <svg id="waterfall" role="img" aria-label="期首残高から営業・投資・財務活動によるキャッシュ・フローを経て期末残高に至るウォーターフォールチャート"></svg>
-            <div id="wf-tooltip" class="tooltip" hidden></div>
+
+          <div class="card chart-card" id="trend-card">
+            <div class="chart-head">
+              <h3>預け金・借入金の推移 <span id="trend-count" class="count-badge"></span></h3>
+              <div class="mode-toggle" role="radiogroup" aria-label="表示する値">
+                <label><input type="radio" name="trend-mode" value="balance" checked> 残高</label>
+                <label><input type="radio" name="trend-mode" value="delta"> 前四半期差</label>
+              </div>
+            </div>
+            <div class="legend">
+              <span class="legend-item"><span class="swatch series-s1"></span>預け金</span>
+              <span class="legend-item"><span class="swatch series-s2"></span>借入金(有利子負債)</span>
+            </div>
+            <div class="chart-wrap">
+              <svg id="trend-chart" role="img" aria-label="選択中の会社の預け金と借入金の四半期推移(縦棒グラフ)"></svg>
+              <div id="tr-tooltip" class="tooltip" hidden></div>
+            </div>
+            <div class="table-scroll">
+              <table class="data-table trend-table" id="trend-table"></table>
+            </div>
+            <p id="trend-empty" class="hint" hidden>推移を描くには、同じ会社で2四半期以上のデータが必要です。</p>
           </div>
         </div>
       </div>
@@ -270,31 +248,6 @@
           <div id="ov-tooltip" class="tooltip" hidden></div>
         </div>
         <p id="overview-missing" class="hint" hidden></p>
-      </div>
-    </section>
-
-    <!-- ===== データ(CSVプレビュー) ===== -->
-    <section id="panel-data" class="panel" role="tabpanel" aria-labelledby="tab-data" tabindex="0" hidden>
-      <div class="card">
-        <div class="chart-head">
-          <h3>読み込んだCSV <span id="data-count" class="count-badge"></span></h3>
-          <div class="data-controls">
-            <label id="data-file-field" class="field" hidden>ファイル
-              <select id="data-file"></select>
-            </label>
-            <label class="field checkbox">
-              <input type="checkbox" id="data-filter" checked> 選択中の会社・四半期のみ
-            </label>
-          </div>
-        </div>
-        <p class="table-hint">アップロードしたCSVをそのまま表形式で表示します。行番号は、上の警告メッセージが指す行番号と対応しています。</p>
-        <div class="table-scroll sheet-scroll">
-          <table class="sheet" id="data-table"></table>
-        </div>
-        <div class="sheet-foot">
-          <span id="data-shown" class="table-hint"></span>
-          <button id="data-more" type="button" class="btn" hidden>さらに500行を表示</button>
-        </div>
       </div>
     </section>
 

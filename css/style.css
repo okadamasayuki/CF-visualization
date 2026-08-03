@@ -470,19 +470,6 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .swatch.series-s1 { background: var(--pos); }
 .swatch.series-s2 { background: var(--series-2); }
 
-.chart-wrap svg .line {
-  fill: none;
-  stroke: var(--series);
-  stroke-width: 2;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-.chart-wrap svg .dot {
-  fill: var(--series);
-  /* 線と重なっても読めるよう、面の色で2pxのリングを付ける */
-  stroke: var(--surface-1);
-  stroke-width: 2;
-}
 .chart-wrap svg .bar.series-s1 { fill: var(--pos); }
 .chart-wrap svg .bar.series-s2 { fill: var(--series-2); }
 .chart-wrap svg .crosshair { stroke: var(--baseline); stroke-width: 1; }
@@ -564,9 +551,40 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 }
 .btn-link:hover { opacity: 0.8; }
 
-/* 列の少ない表は、広い画面でも間延びしないよう幅を止める */
-#cf-body > .card:first-child { max-width: 780px; }
-#summary-card { max-width: 1040px; }
+/* ---- サマリー(左にCF計算書、右上に財務指標、右下に推移) ---- */
+.summary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 760px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.summary-side { display: grid; gap: 16px; align-content: start; }
+/* grid の既定は min-width:auto なので、中身の広い表が枠を押し広げてしまう。
+   0 にして、表側の .table-scroll に横スクロールさせる */
+.summary-grid > *, .summary-side > * { min-width: 0; }
+@media (max-width: 1100px) {
+  .summary-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* グラフの下に置く四半期ごとの数値 */
+.trend-table { font-size: 12px; margin-top: 12px; }
+.trend-table th, .trend-table td { padding: 4px 8px; white-space: nowrap; }
+.trend-table thead th {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: right;
+  border-bottom: 1px solid var(--grid);
+}
+.trend-table thead th.label-col { text-align: left; }
+.trend-table tbody th.label {
+  font-weight: 400;
+  color: var(--text-secondary);
+  text-align: left;
+  white-space: nowrap;
+}
+.trend-table tbody th.label .swatch { margin-right: 6px; }
+.trend-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---- 会社別サマリー(会社ごとのカードを横に並べる) ---- */
 .company-grid {
@@ -757,19 +775,16 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .swatch-pos { background: var(--pos); }
 .swatch-neg { background: var(--neg); }
-.swatch-total { background: var(--total); }
 
 .chart-wrap { position: relative; width: 100%; overflow-x: auto; }
 /* 画面が狭いときは縮小せず横スクロールさせる(ラベルが読めなくなるため) */
 /* 幅・高さはJS側がコンテナ幅から等倍で決めるので、CSSでは伸縮させない */
-#waterfall, #overview-chart, #trend-chart { display: block; }
+#overview-chart, #trend-chart { display: block; }
 
 .chart-wrap svg .grid-line { stroke: var(--grid); stroke-width: 1; }
 .chart-wrap svg .baseline { stroke: var(--baseline); stroke-width: 1; }
-.chart-wrap svg .connector { stroke: var(--baseline); stroke-width: 1; }
 .chart-wrap svg .bar-pos { fill: var(--pos); }
 .chart-wrap svg .bar-neg { fill: var(--neg); }
-.chart-wrap svg .bar-total { fill: var(--total); }
 .chart-wrap svg .tick-label, .chart-wrap svg .cat-label { fill: var(--text-muted); font-size: 11px; }
 .chart-wrap svg .value-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
 .chart-wrap svg .hit { fill: transparent; }
@@ -799,7 +814,7 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 /* ---- CF計算書 ---- */
 .statement-meta { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
 /* 明細と金額の2列だけなので、広い画面でも読みやすい幅で止める */
-.statement { width: 100%; border-collapse: collapse; max-width: 720px; }
+.statement { width: 100%; border-collapse: collapse; }
 .statement td {
   padding: 4px 8px;
   font-variant-numeric: tabular-nums;
