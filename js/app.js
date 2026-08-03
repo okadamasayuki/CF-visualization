@@ -1349,6 +1349,10 @@ function buildDetailTemplate() {
       const v = ds.data && ds.provided.has(`detail:${f.key}`) ? ds.data.detail[f.key] : "";
       lines.push(`${q(ds.company)},${q(ds.period.label)},詳細,${f.label},${v}`);
     }
+    for (const f of DISPLAY_FIELDS.sup) {
+      const v = ds.data && ds.data.sup[f.key] !== 0 ? ds.data.sup[f.key] : "";
+      lines.push(`${q(ds.company)},${q(ds.period.label)},補足,${f.label},${v}`);
+    }
   }
   return lines.join("\r\n") + "\r\n";
 }
@@ -1425,13 +1429,34 @@ function renderDetailPanel() {
     });
     if (ds) input.value = ds.data.bs[which].cashExcluded ? String(ds.data.bs[which].cashExcluded) : "";
     input.disabled = !ds;
-    input.addEventListener("input", () => setPathValue(`bs.${which}.cashExcluded`, input.value, which));
+    input.addEventListener("input", () => setPathValue(`bs.${which}.cashExcluded`, input.value, `cash-excluded-${which}`));
     row.append(
       el("label", { class: "detail-label", for: `cash-excluded-${which}`, text: `現金同等物に含めない預金(${label})` }),
       input,
       el("span", { class: "detail-state", text: ds && ds.data.bs[which].cashExcluded ? "反映中" : "" }),
     );
     cashWrap.append(row);
+  }
+
+  // --- 固定資産の売却による収入(補足情報) ---
+  const saleWrap = document.getElementById("sale-proceeds-form");
+  saleWrap.innerHTML = "";
+  {
+    const set = ds && ds.data.sup.saleProceeds !== 0;
+    const row = el("div", { class: `detail-row${set ? " is-set" : ""}` });
+    const input = el("input", {
+      type: "number", step: "any", min: "0", inputmode: "decimal",
+      id: "sale-proceeds-input", placeholder: "未入力", "aria-label": "有形固定資産の売却による収入",
+    });
+    if (ds) input.value = set ? String(ds.data.sup.saleProceeds) : "";
+    input.disabled = !ds;
+    input.addEventListener("input", () => setPathValue("sup.saleProceeds", input.value, "sale-proceeds-input"));
+    row.append(
+      el("label", { class: "detail-label", for: "sale-proceeds-input", text: "有形固定資産の売却による収入" }),
+      input,
+      el("span", { class: "detail-state", text: set ? "反映中" : "" }),
+    );
+    saleWrap.append(row);
   }
 
   // --- 反映状況 ---
@@ -1490,7 +1515,7 @@ function renderDetailPreview() {
 }
 
 /** BSの科目など、パスを指定して上書きする(手入力は overrides に記録して復元できるようにする) */
-function setPathValue(path, raw, focusSuffix) {
+function setPathValue(path, raw, focusId) {
   const ds = currentDataset();
   if (!ds) return;
   const trimmed = String(raw).trim();
@@ -1512,7 +1537,7 @@ function setPathValue(path, raw, focusSuffix) {
   renderAll();
   if (state.tab === "detail") {
     renderDetailPanel();
-    const focus = document.getElementById(`cash-excluded-${focusSuffix}`);
+    const focus = focusId ? document.getElementById(focusId) : null;
     if (focus) focus.focus();
   }
 }
@@ -1572,15 +1597,17 @@ async function handleDetailFiles(fileList) {
       const target = state.byKey.get(keyOf(parsed.company, parsed.period.label));
       if (!target) { unmatched.push(`${parsed.company} / ${parsed.period.label}`); continue; }
       let touched = false;
-      for (const field of SCHEMA.detail) {
-        const slot = `detail:${field.key}`;
-        if (!parsed.provided.has(slot)) continue;
-        target.data.detail[field.key] = parsed.data.detail[field.key];
-        target.provided.add(slot);
-        const o = state.overrides[keyOf(target.company, target.period.label)]
-          || (state.overrides[keyOf(target.company, target.period.label)] = {});
-        o[`detail.${field.key}`] = parsed.data.detail[field.key];
-        touched = true;
+      for (const [section, fields] of [["detail", SCHEMA.detail], ["sup", SCHEMA.sup]]) {
+        for (const field of fields) {
+          const slot = `${section}:${field.key}`;
+          if (!parsed.provided.has(slot)) continue;
+          target.data[section][field.key] = parsed.data[section][field.key];
+          target.provided.add(slot);
+          const o = state.overrides[keyOf(target.company, target.period.label)]
+            || (state.overrides[keyOf(target.company, target.period.label)] = {});
+          o[`${section}.${field.key}`] = parsed.data[section][field.key];
+          touched = true;
+        }
       }
       if (touched) { recomputeDataset(target); applied++; }
     }
