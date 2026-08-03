@@ -802,12 +802,27 @@ function renderOverviewChart() {
   });
 }
 
+/* 会社別サマリーのカードに出す行。CF計算書と同じ並びにする */
+const OVERVIEW_CF_ROWS = [
+  { key: "operatingCF", label: "営業CF" },
+  { key: "investingCF", label: "投資CF" },
+  { key: "freeCF", label: "フリーCF" },
+  { key: "financingCF", label: "財務CF" },
+  { group: "現金及び現金同等物" },
+  { key: "netChange", label: "増減額", indent: true },
+  { key: "beginningCash", label: "期首残高", indent: true },
+  { key: "endingCash", label: "期末残高", indent: true },
+];
+
 /** 並び替えの選択肢。数値は多い順、会社名は五十音順 */
 const OVERVIEW_SORTS = [
   { key: "name", dir: 1, label: "会社名(五十音順)" },
-  ...OVERVIEW_COLS.filter((c) => !c.type).map((c) => ({
-    key: c.key, dir: -1, label: `${c.label}が多い順`,
+  ...OVERVIEW_CF_ROWS.filter((r) => r.key).map((r) => ({
+    key: r.key, dir: -1,
+    label: `${r.group ? "" : ""}${r.indent ? `${r.label}(現金及び現金同等物)` : r.label}が多い順`,
   })),
+  { key: "revenue", dir: -1, label: "売上高が多い順" },
+  { key: "ebitda", dir: -1, label: "EBITDAが多い順" },
   { key: "ok", dir: 1, label: "整合しないものを先頭に" },
 ];
 
@@ -837,15 +852,17 @@ function sortOverviewRows(rows) {
   });
 }
 
-/** 会社ごとに1枚のカード。指標を縦に並べ、カード自体を横に並べる */
+/**
+ * 会社ごとに1枚のカード。CF計算書と同じ並びの行を縦に置き、
+ * 各行を「今期 / 前年同期 / 増減」の3列で見せる。
+ */
 function renderOverviewCards() {
   const grid = document.getElementById("overview-cards");
   grid.innerHTML = "";
   renderOverviewSortPicker();
   const rows = sortOverviewRows(overviewRows());
-  const fields = OVERVIEW_COLS.filter((c) => !c.type);
 
-  const card = (name, values, { total = false, ok = null, selected = false } = {}) => {
+  const card = (name, cur, old, { total = false, ok = null, selected = false } = {}) => {
     const box = el("div", { class: `company-card${total ? " is-total" : ""}${selected ? " is-selected" : ""}` });
     const head = el("div", { class: "company-card-head" });
     head.append(el("span", { class: "company-card-name", text: name }));
@@ -857,19 +874,42 @@ function renderOverviewCards() {
       }));
     }
     box.append(head);
-    const list = el("dl", { class: "company-metrics" });
-    for (const f of fields) {
-      const row = el("div", { class: "company-metric" });
-      row.append(el("dt", { text: f.label }));
-      row.append(el("dd", { text: values(f) }));
-      list.append(row);
+
+    const table = el("table", { class: "company-cf" });
+    table.append(el("thead", {}, el("tr", {},
+      el("th", { scope: "col", class: "label-col" }),
+      el("th", { scope: "col", text: "今期" }),
+      el("th", { scope: "col", text: "前年同期" }),
+      el("th", { scope: "col", text: "増減" }),
+    )));
+    const tbody = el("tbody");
+    for (const r of OVERVIEW_CF_ROWS) {
+      if (r.group) {
+        const tr = el("tr", { class: "group" });
+        tr.append(el("th", { scope: "colgroup", colspan: "4", text: r.group }));
+        tbody.append(tr);
+        continue;
+      }
+      const a = cur(r.key), b = old ? old(r.key) : null;
+      const diff = a !== null && a !== undefined && b !== null && b !== undefined ? a - b : null;
+      const tr = el("tr", { class: r.indent ? "is-indent" : "" });
+      tr.append(el("th", { scope: "row", text: r.label }));
+      tr.append(el("td", { class: "num", text: fmt(a) }));
+      tr.append(el("td", { class: "num muted", text: b === null || b === undefined ? "—" : fmt(b) }));
+      // 増減の色は「増えた=良い」で付ける(投資CFは支出が多いほど小さくなる点に注意)
+      const tone = diff === null || diff === 0 ? "" : diff > 0 ? "up" : "down";
+      tr.append(el("td", { class: `num ${tone}`, text: diff === null ? "—" : fmtSigned(diff) }));
+      tbody.append(tr);
     }
-    box.append(list);
+    table.append(tbody);
+    box.append(table);
     return box;
   };
 
   for (const r of rows) {
-    const box = card(r.name, (f) => fmtBy(f.kind, r[f.key]),
+    const ds = state.byKey.get(keyOf(r.name, state.period));
+    const yoy = ds ? yoyDataset(ds) : null;
+    const box = card(r.name, (k) => r[k], yoy ? (k) => yoy.metrics[k] : null,
       { ok: r.ok, selected: r.name === state.company });
     box.setAttribute("role", "button");
     box.setAttribute("tabindex", "0");
@@ -881,12 +921,23 @@ function renderOverviewCards() {
     grid.append(box);
   }
 
-  // 合計のカード(比率は合算できないので空欄にする)
-  grid.append(card(`合計(${rows.length}社)`, (f) => {
-    if (f.kind === "pct") return "—";
-    const vals = rows.map((r) => r[f.key]).filter((v) => v !== null && v !== undefined);
-    return vals.length ? fmt(vals.reduce((s, v) => s + v, 0)) : "—";
-  }, { total: true }));
+  // 合計のカード。前年同期は、全社そろっているときだけ出す
+  // (一部の会社しか前年がないと、増減が実態とずれてしまうため)
+  const yoyRows = rows
+    .map((r) => {
+      const ds = state.byKey.get(keyOf(r.name, state.period));
+      const y = ds ? yoyDataset(ds) : null;
+      return y ? y.metrics : null;
+    })
+    .filter(Boolean);
+  const sum = (list, key) => {
+    const vals = list.map((m) => m[key]).filter((v) => v !== null && v !== undefined);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+  };
+  grid.append(card(`合計(${rows.length}社)`,
+    (k) => sum(rows, k),
+    yoyRows.length === rows.length && rows.length > 0 ? (k) => sum(yoyRows, k) : null,
+    { total: true }));
 }
 
 /* =========================================================
