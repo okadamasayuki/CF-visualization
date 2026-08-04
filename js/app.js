@@ -2339,6 +2339,20 @@ async function sharePull() {
     if (read.scheme) sh.scheme = read.scheme;
     shareEl("share-update").hidden = true;
     if (read.sources.length === 0) {
+      // データファイルはまだ無いが、科目マッピングだけ置いてあるフォルダにも対応する
+      if (read.mappingText) {
+        sh.suppress = true;
+        const okM = setMapping(read.mappingText, { quiet: true });
+        if (okM) {
+          if (state.sources.length) applySources(state.sources, { keepModalOpen: true });
+          else saveState();
+        }
+        sh.suppress = false;
+        if (okM) {
+          shareStatus(`共有フォルダから科目マッピング(${state.mapping.entries.size}科目)を読み込みました。データファイルはまだありません。`, "ok");
+          return true;
+        }
+      }
       shareStatus("共有フォルダにデータがありません。", "");
       return false;
     }
@@ -2377,6 +2391,20 @@ async function shareAfterConnect() {
   }
   sh.stamps = peek.stamps;
   if (peek.scheme) sh.scheme = peek.scheme;
+
+  // フォルダに科目マッピングがあり、この端末に無ければ先に取り込む。
+  // (取り込まずに書き出すと、フォルダの mapping.csv を消してしまうため)
+  let adoptedMapping = false;
+  if (peek.mappingText && !state.mappingText) {
+    sh.suppress = true;
+    if (setMapping(peek.mappingText, { quiet: true })) {
+      adoptedMapping = true;
+      if (state.sources.length) applySources(state.sources, { keepModalOpen: true });
+      else saveState();
+    }
+    sh.suppress = false;
+  }
+
   const folderHas = peek.sources.length > 0;
   const localHas = state.sources.length > 0;
 
@@ -2392,7 +2420,9 @@ async function shareAfterConnect() {
     shareStatus(`共有フォルダに ${peek.sources.length}ファイル、この端末に ${state.sources.length}ファイルあります。どちらを使うか、下のボタンで選んでください。`, "");
     return;
   }
-  shareStatus("共有フォルダに接続しました。CSVを読み込むと、このフォルダに保存されます。", "ok");
+  shareStatus(adoptedMapping
+    ? `共有フォルダに接続し、科目マッピング(${state.mapping.entries.size}科目)を読み込みました。CSVを読み込むと、このフォルダに保存されます。`
+    : "共有フォルダに接続しました。CSVを読み込むと、このフォルダに保存されます。", "ok");
 }
 
 async function shareConnect() {
