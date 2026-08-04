@@ -318,6 +318,43 @@
       </details>
     </section>
 
+      <!-- 科目マッピング(算定ロジックファイル) -->
+      <section class="card" id="mapping-card">
+        <div class="chart-head">
+          <h3>科目マッピング(算定ロジックファイル) <span id="mapping-state" class="count-badge">組み込みの対応を使用中</span></h3>
+        </div>
+        <p class="hint">
+          社内の勘定科目が一般的な名前と違う場合に使います。「どの科目を、どの項目に、+と−のどちらで反映するか」だけを
+          定義したCSV(金額・会社・会計期間は書かない)を読み込ませると、組み込みの対応より優先して
+          CF計算書・財務指標・全社比較のすべてに反映されます。
+          まず「現在の算定ロジックをダウンロード」で今の対応表を取り出し、科目名を書き替えて読み込ませてください。
+        </p>
+        <div class="toolbar">
+          <button id="btn-mapping-template" type="button" class="btn">現在の算定ロジックをCSVでダウンロード</button>
+          <button id="btn-mapping-upload" type="button" class="btn btn-secondary">マッピングCSVを読み込む</button>
+          <input type="file" id="mapping-file-input" accept=".csv,.tsv,.txt,text/csv" hidden>
+          <button id="btn-mapping-clear" type="button" class="btn btn-ghost" hidden>マッピングを解除</button>
+        </div>
+        <p id="mapping-status" class="file-status" hidden></p>
+        <details class="format-help">
+          <summary>マッピングCSVの書き方</summary>
+          <p>1行目に見出し、2行目以降に「科目, 反映先の区分, 反映先の科目, 符号」を並べます。</p>
+<pre><code>科目,反映先の区分,反映先の科目,符号
+現金・預金(3ヶ月以下),BS,現金及び預金,+
+減価償却累計額(建物),BS,有形固定資産(純額),-
+受取利息及び割引料(営業外),PL,受取利息及び受取配当金,+
+受取利息及び割引料(営業外),PL,税引前当期純利益,+
+人件費・従業員給与,PL,税引前当期純利益,-</code></pre>
+          <ul>
+            <li><strong>同じ科目を複数行書くと、複数の項目へ同時に反映されます。</strong>PLに税引前当期純利益の行がない場合は、収益の各行を「税引前当期純利益 +」、費用の各行を「税引前当期純利益 −」にも割り当ててください(法人税等の行は除く)。</li>
+            <li>反映先の区分は <code>BS</code> / <code>PL</code> / <code>SS</code> / <code>補足</code> / <code>詳細</code>、反映先の科目はテンプレートCSVにある正式名です。</li>
+            <li>符号は <code>+</code>(足す)か <code>-</code>(引く)。減価償却累計額や貸倒引当金のような控除科目は <code>-</code> にします。</li>
+            <li>マッピングに書いた科目はその指定どおりに、書いていない科目はこれまで通り組み込みの対応で取り込みます。</li>
+            <li>共有フォルダに接続していれば <code>mapping.csv</code> として保存され、全員に同じマッピングが適用されます。</li>
+          </ul>
+        </details>
+      </section>
+
       <!-- 共有フォルダ -->
       <section class="card" id="share-card">
         <div class="chart-head">
@@ -380,6 +417,7 @@
 
 <script src="js/schema.js?v=__BUILD__"></script>
 <script src="js/csv.js?v=__BUILD__"></script>
+<script src="js/mapping.js?v=__BUILD__"></script>
 <script src="js/metrics.js?v=__BUILD__"></script>
 <script src="js/derivation.js?v=__BUILD__"></script>
 <script src="js/share.js?v=__BUILD__"></script>

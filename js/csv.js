@@ -257,7 +257,7 @@ function inferLayout(rows) {
  * @param {string} defaultCompany 会社名の列がない場合に使う名前(通常はファイル名)
  * @returns {{datasets: {company, period, data, hasPrev}[], ok, errors[], warnings[], matched, recognized, unmatched[]}}
  */
-function parseFinancialCSV(text, defaultCompany = "対象会社") {
+function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null) {
   const errors = [];
   const warnings = [];
   const fail = (msg) => ({
@@ -315,6 +315,42 @@ function parseFinancialCSV(text, defaultCompany = "対象会社") {
     const period = (cols.period !== null && lastPeriod) ? lastPeriod : NO_PERIOD;
     const dataset = datasetFor(companyName, period);
     const data = dataset.data;
+
+    // 読み込んだ科目マッピングがあれば、組み込みの対応より優先する。
+    // 1つの科目を複数の項目へ同時に反映できる(符号はマッピングの指定どおり)
+    const mapped = mappingLookup(mapping, rawName);
+    if (mapped) {
+      recognized++;
+      let usedM = false;
+      for (const t of mapped) {
+        const putM = (which, raw) => {
+          let v = parseAmount(raw);
+          if (v === null) return false;
+          if (Number.isNaN(v)) {
+            warnings.push(`${lineNo}行目「${rawName}」の金額「${String(raw).trim()}」を数値として読み取れませんでした。0として扱います。`);
+            return false;
+          }
+          v *= t.sign;
+          const bucket = t.section === "bs" ? data.bs[which] : data[t.section];
+          const slot = `${companyName}\u0000${period.label}\u0000${t.section}:${t.key}:${which}`;
+          bucket[t.key] = (seen.has(slot) ? bucket[t.key] : 0) + v;
+          seen.set(slot, true);
+          dataset.provided.add(`${t.section}:${t.key}`);
+          return true;
+        };
+        if (t.section === "bs") {
+          if (cols.prev !== null && putM("prev", row[cols.prev])) { usedM = true; dataset.hasPrev = true; }
+          if (cols.curr !== null) usedM = putM("curr", row[cols.curr]) || usedM;
+        } else {
+          const raw = cols.curr !== null && parseAmount(row[cols.curr]) !== null
+            ? row[cols.curr]
+            : (cols.prev !== null ? row[cols.prev] : "");
+          usedM = putM("curr", raw) || usedM;
+        }
+      }
+      if (usedM) matched++;
+      continue;
+    }
 
     const target = lookupItem(rawName);
     if (!target) {

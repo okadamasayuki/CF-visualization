@@ -23,6 +23,7 @@ const SHARE_HANDLE_KEY = "dir";
 const SHARE_DATA_DIR = "data";
 const SHARE_OVERRIDE_DIR = "overrides";
 const SHARE_SETTINGS = "settings.json";
+const SHARE_MAPPING = "mapping.csv"; // 科目マッピング(算定ロジックファイル)
 const SHARE_PUSH_DELAY = 1200; // 連続した変更をまとめる待ち時間(ms)
 
 /** この環境で共有フォルダ連携が使えるか(Chrome/Edge のデスクトップ + HTTPS) */
@@ -217,8 +218,16 @@ async function shareRead(dir) {
     try { settings = JSON.parse(raw.text.replace(/^﻿/, "")); } catch (_) { /* 無視 */ }
   }
 
+  // 科目マッピング(あれば)
+  let mappingText = "";
+  const mapRaw = await readFile(dir, SHARE_MAPPING);
+  if (mapRaw) {
+    stamps.set(SHARE_MAPPING, mapRaw.modified);
+    mappingText = mapRaw.text.replace(/^\ufeff/, "");
+  }
+
   const scheme = settings && settings.nameScheme === "ascii" ? "ascii" : settings ? "unicode" : null;
-  return { sources, overrides, settings, stamps, scheme };
+  return { sources, overrides, settings, stamps, scheme, mappingText };
 }
 
 /* ---------- 書き出し ---------- */
@@ -275,6 +284,16 @@ async function shareWrite(dir, payload, { prune = false, by = "", scheme = null 
     stamps.set(`${SHARE_OVERRIDE_DIR}/${name}`, (await handle.getFile()).lastModified);
   }
 
+  // --- mapping.csv(科目マッピング) ---
+  if (payload.mappingText) {
+    await writeFile(dir, SHARE_MAPPING, payload.mappingText);
+    const m = await readFile(dir, SHARE_MAPPING);
+    if (m) stamps.set(SHARE_MAPPING, m.modified);
+  } else if (await readFile(dir, SHARE_MAPPING)) {
+    // マッピングを解除した状態を共有するため、ファイルも消す
+    await dir.removeEntry(SHARE_MAPPING);
+  }
+
   // --- settings.json ---
   await writeFile(dir, SHARE_SETTINGS, JSON.stringify({
     app: "CF-visualization",
@@ -304,6 +323,8 @@ async function shareStamps(dir) {
   }
   const s = await readFile(dir, SHARE_SETTINGS);
   if (s) stamps.set(SHARE_SETTINGS, s.modified);
+  const m = await readFile(dir, SHARE_MAPPING);
+  if (m) stamps.set(SHARE_MAPPING, m.modified);
   return stamps;
 }
 

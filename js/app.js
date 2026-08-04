@@ -43,6 +43,8 @@ const state = {
   derivLine: 0,           // 算定ロジックで選択中のCF行
   detailPreviewLimit: 20, // 詳細テンプレートのプレビュー行数
   overrides: {},          // 画面で手入力した詳細情報(ファイルに残らないので別途保存)
+  mappingText: "",        // 科目マッピングCSVの原文(保存・共有用)
+  mapping: null,          // parseMappingCSV の結果(entries)
   interestPolicy: INTEREST_POLICY_DEFAULT,
 };
 
@@ -1688,7 +1690,7 @@ async function handleDetailFiles(fileList) {
 
   for (const f of files) {
     const text = await decodeFile(f);
-    const result = parseFinancialCSV(text, baseName(f.name));
+    const result = parseFinancialCSV(text, baseName(f.name), state.mapping);
     for (const parsed of result.datasets) {
       const target = state.byKey.get(keyOf(parsed.company, parsed.period.label));
       if (!target) { unmatched.push(`${parsed.company} / ${parsed.period.label}`); continue; }
@@ -1913,6 +1915,7 @@ function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       sources: state.sources, overrides: state.overrides,
       interestPolicy: state.interestPolicy,
+      mappingText: state.mappingText,
     }));
     document.getElementById("storage-warning").hidden = true;
   } catch (err) {
@@ -2039,13 +2042,13 @@ function applyOverrides() {
   return applied;
 }
 
-function applySources(sources) {
+function applySources(sources, { keepModalOpen = false } = {}) {
   const errors = [], warnings = [];
   const merged = new Map();
   let matched = 0;
 
   for (const src of sources) {
-    const result = parseFinancialCSV(src.text, baseName(src.name));
+    const result = parseFinancialCSV(src.text, baseName(src.name), state.mapping);
     const prefix = sources.length > 1 ? `${src.name}: ` : "";
     errors.push(...result.errors.map((e) => prefix + e));
     warnings.push(...result.warnings.map((w) => prefix + w));
@@ -2093,7 +2096,7 @@ function applySources(sources) {
   renderMessages(errors, warnings);
   renderSelectors();
   renderAll();
-  closeSourceModal();
+  if (!keepModalOpen) closeSourceModal();
 
   saveState();
 }
@@ -2127,6 +2130,84 @@ function clearAll() {
   messages.innerHTML = "";
   try { localStorage.removeItem(STORAGE_KEY); } catch (_) { /* 無視 */ }
   showEmptyState();
+}
+
+/* =========================================================
+ * 科目マッピング(算定ロジックファイル)
+ * ======================================================= */
+
+function renderMappingStatus() {
+  const badge = document.getElementById("mapping-state");
+  const active = !!state.mapping && state.mapping.entries.size > 0;
+  badge.textContent = active
+    ? `${state.mapping.entries.size}科目のマッピングを適用中`
+    : "組み込みの対応を使用中";
+  document.getElementById("btn-mapping-clear").hidden = !active;
+}
+
+function mappingStatus(text, kind = "") {
+  const el2 = document.getElementById("mapping-status");
+  el2.hidden = !text;
+  el2.textContent = text;
+  el2.className = `file-status ${kind}`;
+}
+
+/** マッピングを差し替えて、読み込み済みデータがあれば再計算する */
+function setMapping(text, { quiet = false } = {}) {
+  if (!text) {
+    state.mappingText = "";
+    state.mapping = null;
+  } else {
+    const parsed = parseMappingCSV(text);
+    if (parsed.errors.length) {
+      if (!quiet) {
+        mappingStatus(`読み込めませんでした: ${parsed.errors.slice(0, 3).join(" / ")}` +
+          (parsed.errors.length > 3 ? ` ほか${parsed.errors.length - 3}件` : ""), "ng");
+      }
+      return false;
+    }
+    state.mappingText = text;
+    state.mapping = parsed;
+    if (!quiet && parsed.warnings.length) renderMessages([], parsed.warnings);
+  }
+  renderMappingStatus();
+  return true;
+}
+
+async function handleMappingFile(fileList) {
+  const files = [...fileList];
+  if (files.length === 0) return;
+  try {
+    const text = await decodeFile(files[0]);
+    if (!setMapping(text)) return;
+    const n = state.mapping.entries.size;
+    if (state.sources.length) {
+      applySources(state.sources, { keepModalOpen: true });
+      mappingStatus(`${n}科目のマッピングを読み込み、読み込み済みのデータを再計算しました。`, "ok");
+    } else {
+      mappingStatus(`${n}科目のマッピングを読み込みました。次にCSVを読み込むと適用されます。`, "ok");
+    }
+    saveState();
+  } catch (err) {
+    mappingStatus(`読み込めませんでした: ${err.message}`, "ng");
+  }
+  document.getElementById("mapping-file-input").value = "";
+}
+
+function bindMappingUI() {
+  document.getElementById("btn-mapping-template").addEventListener("click", () => {
+    downloadText("cf-mapping.csv", state.mappingText || buildMappingTemplate());
+  });
+  const input = document.getElementById("mapping-file-input");
+  document.getElementById("btn-mapping-upload").addEventListener("click", () => input.click());
+  input.addEventListener("change", () => handleMappingFile(input.files));
+  document.getElementById("btn-mapping-clear").addEventListener("click", () => {
+    setMapping("");
+    if (state.sources.length) applySources(state.sources, { keepModalOpen: true });
+    mappingStatus("マッピングを解除し、組み込みの対応に戻しました。", "");
+    saveState();
+  });
+  renderMappingStatus();
 }
 
 /* =========================================================
@@ -2220,6 +2301,7 @@ function sharePayload() {
     sources: state.sources,
     overrides: state.overrides,
     interestPolicy: state.interestPolicy,
+    mappingText: state.mappingText,
   };
 }
 
@@ -2262,6 +2344,7 @@ async function sharePull() {
     }
     // 読み込んだ直後に書き戻さないよう、いったん自動書き出しを止める
     sh.suppress = true;
+    setMapping(read.mappingText || "", { quiet: true });
     state.overrides = read.overrides || {};
     if (read.settings && INTEREST_POLICIES.some((p) => p.key === read.settings.interestPolicy)) {
       state.interestPolicy = read.settings.interestPolicy;
@@ -2540,6 +2623,9 @@ document.addEventListener("DOMContentLoaded", () => {
   try {
     for (const k of OBSOLETE_STORAGE_KEYS) localStorage.removeItem(k);
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (saved && typeof saved.mappingText === "string" && saved.mappingText) {
+      setMapping(saved.mappingText, { quiet: true });
+    }
     if (saved && Array.isArray(saved.sources) && saved.sources.length) {
       state.overrides = saved.overrides && typeof saved.overrides === "object" ? saved.overrides : {};
       if (INTEREST_POLICIES.some((p) => p.key === saved.interestPolicy)) state.interestPolicy = saved.interestPolicy;
@@ -2549,6 +2635,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   renderTabs();
   bindSourceModal();
+  bindMappingUI();
   bindShareUI();
   // まだ何も読み込まれていなければ、読み込み画面を開いた状態で始める
   if (!hasData()) openSourceModal();
