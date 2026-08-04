@@ -120,6 +120,14 @@ function mappingLookup(mapping, name) {
 function buildMappingTemplate() {
   const q = (s) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
   const lines = ["科目,反映先の区分,反映先の科目,符号"];
+  // 同じ科目を複数行書くと複数の項目へ同時に反映される、の記入例。
+  // 「(記入例)」で始まる科目名は実データに現れないので、消し忘れても無害
+  lines.push(
+    "(記入例)受取利息及び割引料(営業外),PL,受取利息及び受取配当金,+",
+    "(記入例)受取利息及び割引料(営業外),PL,税引前当期純利益,+",
+    "(記入例)人件費・従業員給与,PL,税引前当期純利益,-",
+    "(記入例)減価償却累計額(建物),BS,有形固定資産(純額),-",
+  );
   for (const [section, label] of Object.entries(SECTION_LABELS)) {
     for (const f of SCHEMA[section]) {
       // aliasOnly の行(固定資産売却損など)は、その符号ごと別名として書き出す
