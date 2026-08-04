@@ -730,6 +730,21 @@ tr.has-note { cursor: help; }
 }
 #share-card .toolbar { margin-top: 0; }
 #share-card .field.checkbox { margin-top: 10px; }
+.share-locate { margin: 0 0 10px; }
+.share-locate .toolbar { margin-bottom: 8px; }
+.share-locate .hint { margin: 0; }
+.share-path-input {
+  flex: 1;
+  min-width: 240px;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--grid);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+.share-path-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .unit-note { color: var(--text-muted); font-size: 12px; }
 
 /* ---- 読み込み結果のカード ---- */

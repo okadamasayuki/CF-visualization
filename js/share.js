@@ -299,6 +299,7 @@ async function shareWrite(dir, payload, { prune = false, by = "", scheme = null 
     app: "CF-visualization",
     nameScheme: scheme,
     interestPolicy: payload.interestPolicy,
+    folderPath: payload.folderPath || "",
     updatedAt: new Date().toISOString(),
     updatedBy: by || "",
     files: payload.sources.length,

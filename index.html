@@ -373,6 +373,20 @@
         </div>
         <div id="share-controls" hidden>
           <p id="share-path" class="share-path" hidden></p>
+          <div id="share-locate" class="share-locate" hidden>
+            <div class="toolbar">
+              <button id="btn-share-copy-path" type="button" class="btn btn-secondary" hidden>フォルダの場所をコピー</button>
+              <button id="btn-share-path-edit" type="button" class="btn btn-ghost">フォルダの場所を登録</button>
+            </div>
+            <div class="toolbar" id="share-path-editor" hidden>
+              <input type="text" id="share-path-input" class="share-path-input"
+                     placeholder="例: \\fileserver\経理\CF共有 (エクスプローラーのアドレス欄からコピー)">
+              <button id="btn-share-path-save" type="button" class="btn">保存</button>
+            </div>
+            <p class="hint">ブラウザの制約でエクスプローラーを直接開くことはできないため、
+              「フォルダの場所をコピー」→ エクスプローラー(Win+E)のアドレス欄に貼り付けて Enter、で開いてください。
+              一度登録すれば settings.json に保存され、同じフォルダを使う全員で共有されます。</p>
+          </div>
           <div class="toolbar">
             <button id="btn-share-pick" type="button" class="btn btn-secondary">共有フォルダを選ぶ</button>
             <button id="btn-share-reconnect" type="button" class="btn btn-secondary" hidden>共有フォルダに再接続</button>
@@ -400,7 +414,8 @@
 <pre><code>&lt;共有フォルダ&gt;/
   data/         読み込んだCSVをそのまま置きます
   overrides/    詳細入力を 会社×四半期ごとのJSONで置きます
-  settings.json 表示区分などの設定と、最終更新の記録</code></pre>
+  mapping.csv   科目マッピング(読み込んでいるときだけ)
+  settings.json 表示区分・フォルダの場所などの設定と、最終更新の記録</code></pre>
             <ul>
               <li><strong>ファイル単位で「最後に保存した人が勝ち」</strong>です。会社×四半期ごとにCSVを分けておくと、同時に作業してもぶつかりにくくなります。</li>
               <li>他の人がフォルダを更新すると、このページに戻ったときに案内が出ます。読み込むまでこちらの表示は変わりません。</li>

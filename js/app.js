@@ -39,7 +39,7 @@ const state = {
   sources: [],
   tab: "summary",
   // 共有フォルダ連携の状態(dir はディレクトリハンドル)
-  share: { dir: null, auto: true, stamps: new Map(), busy: false, timer: null, suppress: false, scheme: null, saved: false },
+  share: { dir: null, auto: true, stamps: new Map(), busy: false, timer: null, suppress: false, scheme: null, saved: false, folderPath: "" },
   derivLine: 0,           // 算定ロジックで選択中のCF行
   detailPreviewLimit: 20, // 詳細テンプレートのプレビュー行数
   overrides: {},          // 画面で手入力した詳細情報(ファイルに残らないので別途保存)
@@ -2271,9 +2271,14 @@ function renderShare() {
   const connected = !!state.share.dir;
   shareEl("share-state").textContent = connected ? "接続中" : "未接続";
   shareEl("share-path").hidden = !connected;
+  shareEl("share-locate").hidden = !connected;
   if (connected) {
-    shareEl("share-path").textContent =
-      `フォルダ:${state.share.dir.name}(ブラウザの仕様で、完全なパスは表示できません)`;
+    const fp = state.share.folderPath || "";
+    shareEl("share-path").textContent = fp
+      ? `フォルダ:${state.share.dir.name}(${fp})`
+      : `フォルダ:${state.share.dir.name}(ブラウザの仕様で、完全なパスは自動では取得できません)`;
+    shareEl("btn-share-copy-path").hidden = !fp;
+    shareEl("btn-share-path-edit").textContent = fp ? "フォルダの場所を変更" : "フォルダの場所を登録";
   }
   shareEl("btn-share-pick").textContent = connected ? "別のフォルダを選ぶ" : "共有フォルダを選ぶ";
   for (const [id, show] of [
@@ -2302,6 +2307,7 @@ function sharePayload() {
     overrides: state.overrides,
     interestPolicy: state.interestPolicy,
     mappingText: state.mappingText,
+    folderPath: state.share.folderPath,
   };
 }
 
@@ -2363,6 +2369,9 @@ async function sharePull() {
     if (read.settings && INTEREST_POLICIES.some((p) => p.key === read.settings.interestPolicy)) {
       state.interestPolicy = read.settings.interestPolicy;
     }
+    if (read.settings && typeof read.settings.folderPath === "string" && read.settings.folderPath) {
+      state.share.folderPath = read.settings.folderPath;
+    }
     applySources(read.sources);
     sh.suppress = false;
     const when = read.settings && read.settings.updatedAt
@@ -2391,6 +2400,9 @@ async function shareAfterConnect() {
   }
   sh.stamps = peek.stamps;
   if (peek.scheme) sh.scheme = peek.scheme;
+  if (peek.settings && typeof peek.settings.folderPath === "string" && peek.settings.folderPath) {
+    sh.folderPath = peek.settings.folderPath;
+  }
 
   // フォルダに科目マッピングがあり、この端末に無ければ先に取り込む。
   // (取り込まずに書き出すと、フォルダの mapping.csv を消してしまうため)
@@ -2457,7 +2469,7 @@ async function shareReconnect() {
 async function shareDisconnect() {
   if (state.share.timer) clearTimeout(state.share.timer);
   state.share = { dir: null, auto: state.share.auto, stamps: new Map(), busy: false,
-    timer: null, suppress: false, scheme: null, saved: false };
+    timer: null, suppress: false, scheme: null, saved: false, folderPath: "" };
   try { await idbDelHandle(); } catch (_) { /* 無視 */ }
   shareStatus("接続を解除しました。この端末のデータはそのまま残ります。", "");
   renderShare();
@@ -2493,6 +2505,38 @@ function bindShareUI() {
   });
   shareEl("btn-share-sync").addEventListener("click", () => sharePush({ prune: true }));
   shareEl("btn-share-disconnect").addEventListener("click", shareDisconnect);
+  shareEl("btn-share-copy-path").addEventListener("click", async () => {
+    const fp = state.share.folderPath;
+    if (!fp) return;
+    try {
+      await navigator.clipboard.writeText(fp);
+      shareStatus("フォルダの場所をコピーしました。エクスプローラー(Win+E)のアドレス欄に貼り付けて Enter を押すと開きます。", "ok");
+    } catch (_) {
+      // クリップボードが使えない環境では、手動でコピーしてもらう
+      window.prompt("この場所をコピーして、エクスプローラーのアドレス欄に貼り付けてください:", fp);
+    }
+  });
+  shareEl("btn-share-path-edit").addEventListener("click", () => {
+    const ed = shareEl("share-path-editor");
+    ed.hidden = !ed.hidden;
+    if (!ed.hidden) {
+      shareEl("share-path-input").value = state.share.folderPath || "";
+      shareEl("share-path-input").focus();
+    }
+  });
+  const savePath = () => {
+    state.share.folderPath = shareEl("share-path-input").value.trim();
+    shareEl("share-path-editor").hidden = true;
+    renderShare();
+    scheduleSharePush();
+    shareStatus(state.share.folderPath
+      ? "フォルダの場所を登録しました。settings.json に保存され、同じフォルダを使う全員が「フォルダの場所をコピー」を使えます。"
+      : "フォルダの場所の登録を消しました。", "ok");
+  };
+  shareEl("btn-share-path-save").addEventListener("click", savePath);
+  shareEl("share-path-input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); savePath(); }
+  });
   shareEl("share-auto").addEventListener("change", (ev) => {
     state.share.auto = ev.target.checked;
     try { localStorage.setItem(SHARE_AUTO_KEY, ev.target.checked ? "1" : "0"); } catch (_) { /* 無視 */ }
