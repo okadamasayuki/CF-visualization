@@ -75,7 +75,10 @@ const HEADER_ALIASES = {
   period: ["四半期", "期", "期間", "会計期間", "決算期", "年度", "対象期間", "決算期間",
     "quarter", "period", "term", "fy", "fiscalquarter", "yearquarter"],
   section: ["区分", "分類", "財務諸表", "表", "種別", "section", "category", "type", "sheet"],
-  item: ["科目", "項目", "勘定科目", "名称", "内容", "変動事由", "item", "account", "name", "label"],
+  item: ["科目", "科目名", "勘定科目", "勘定科目名", "項目", "名称", "内容", "変動事由",
+    "item", "account", "name", "label"],
+  code: ["科目コード", "勘定科目コード", "勘定コード", "科目cd", "勘定科目cd", "コード",
+    "code", "itemcode", "accountcode", "accountno"],
   prev: ["前期末", "前期", "前期末残高", "前期首", "期首", "期首残高", "前年度", "前事業年度", "前連結会計年度",
     "prev", "previous", "beginning", "opening", "priorperiod", "prior"],
   curr: ["当期末", "当期", "当期末残高", "期末", "期末残高", "当年度", "当事業年度", "当連結会計年度", "金額",
@@ -208,7 +211,7 @@ function isAmountLike(raw) {
  */
 function findHeader(rows) {
   for (let r = 0; r < Math.min(rows.length, 10); r++) {
-    const cols = { company: null, period: null, section: null, item: null, prev: null, curr: null };
+    const cols = { company: null, period: null, section: null, item: null, code: null, prev: null, curr: null };
     let amountCols = 0;
     rows[r].forEach((cell, c) => {
       const role = HEADER_INDEX.get(normalizeKey(cell));
@@ -216,17 +219,19 @@ function findHeader(rows) {
       cols[role] = c;
       if (role === "prev" || role === "curr") amountCols++;
     });
-    if (cols.item !== null && amountCols > 0) return { headerRow: r, cols };
+    if ((cols.item !== null || cols.code !== null) && amountCols > 0) return { headerRow: r, cols };
   }
   return null;
 }
 
-/** 見出し行がない場合に、科目名が並ぶ列と金額列を推定する */
-function inferLayout(rows) {
+/** 見出し行がない場合に、科目名(またはマッピング済みのコード)が並ぶ列と金額列を推定する */
+function inferLayout(rows, mapping = null) {
   const width = Math.max(...rows.map((r) => r.length));
   const hits = new Array(width).fill(0);
   for (const row of rows) {
-    for (let c = 0; c < row.length; c++) if (lookupItem(row[c])) hits[c]++;
+    for (let c = 0; c < row.length; c++) {
+      if (lookupItem(row[c]) || mappingLookup(mapping, row[c])) hits[c]++;
+    }
   }
   const itemCol = hits.indexOf(Math.max(...hits));
   if (hits[itemCol] === 0) return null;
@@ -244,6 +249,7 @@ function inferLayout(rows) {
       period: null,
       section: null,
       item: itemCol,
+      code: null,
       prev: amountCols.length >= 2 ? amountCols[0] : null,
       curr: amountCols.length >= 2 ? amountCols[1] : amountCols[0],
     },
@@ -267,7 +273,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
   const rows = parseDelimited(text, detectDelimiter(text));
   if (rows.length === 0) return fail("ファイルが空です。");
 
-  const layout = findHeader(rows) || inferLayout(rows);
+  const layout = findHeader(rows) || inferLayout(rows, mapping);
   if (!layout) {
     return fail("科目名の列を判別できませんでした。1行目に「会社名,区分,科目,前期末,当期末」の見出しを入れてください(テンプレートCSVをご利用ください)。");
   }
@@ -299,7 +305,10 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
   for (let r = layout.headerRow + 1; r < rows.length; r++) {
     const row = rows[r];
     const lineNo = r + 1;
-    const rawName = (row[cols.item] || "").trim();
+    // 科目名の列と科目コードの列は別でもよい。名前が空ならコードを表示名に使う
+    const rawItem = cols.item !== null ? (row[cols.item] || "").trim() : "";
+    const rawCode = cols.code !== null && cols.code !== cols.item ? (row[cols.code] || "").trim() : "";
+    const rawName = rawItem || rawCode;
     if (rawName === "") continue;
 
     // 会社名・四半期が空のセルは直前の行から引き継ぐ(先頭行にだけ書く表に対応)
@@ -317,8 +326,9 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     const data = dataset.data;
 
     // 読み込んだ科目マッピングがあれば、組み込みの対応より優先する。
+    // 科目コードの列があればコードで照合し、無ければ(または外れたら)科目名で照合する。
     // 1つの科目を複数の項目へ同時に反映できる(符号はマッピングの指定どおり)
-    const mapped = mappingLookup(mapping, rawName);
+    const mapped = mappingLookup(mapping, rawCode) || mappingLookup(mapping, rawItem);
     if (mapped) {
       recognized++;
       let usedM = false;
