@@ -267,19 +267,25 @@ function refineHeaderLayout(rows, layout) {
     }
   }
 
-  // 科目名の見出しが見つかっていない場合: 見出しの割り当てが無い列から、
-  // 名前らしい文字が最も多い列を科目名の列として使う
+  // 科目名の見出しが見つかっていない場合: コード列のすぐ右の列(通常はB列)を
+  // 最優先で科目名として使い、そこに文字が無ければ他の列から探す
   if (cols.item === null && cols.code !== null) {
     const used = new Set(Object.values(cols).filter((v) => v !== null && v !== undefined));
-    const width = Math.max(...data.map((r) => r.length));
-    let best = null;
-    let bestN = 0;
-    for (let c = 0; c < width; c++) {
-      if (used.has(c)) continue;
-      const n = textScore(c);
-      if (n > bestN) { bestN = n; best = c; }
+    const need = Math.min(3, data.length);
+    const adjacent = cols.code + 1;
+    if (!used.has(adjacent) && textScore(adjacent) >= need) {
+      cols.item = adjacent;
+    } else {
+      const width = Math.max(...data.map((r) => r.length));
+      let best = null;
+      let bestN = 0;
+      for (let c = 0; c < width; c++) {
+        if (used.has(c)) continue;
+        const n = textScore(c);
+        if (n > bestN) { bestN = n; best = c; }
+      }
+      if (best !== null && bestN >= need) cols.item = best;
     }
-    if (best !== null && bestN >= Math.min(3, data.length)) cols.item = best;
   }
 
   // コードが桁ぞろいで並ぶ表は残高試算表として扱う。これにより
@@ -332,19 +338,25 @@ function inferTrialBalanceLayout(rows) {
   const [codeCol, sideCol] = best.split(":").map(Number);
   const dataRows = votes.get(best);
 
-  // 科目名: コード列と貸借列の間で、数字ではない文字が最も多く入っている列。
-  // 無ければコード列より左も探す(名称→コードの順のレイアウト対応)
+  // 科目名: コード列のすぐ右の列(通常はB列)を最優先で使う。
+  // そこに文字が無ければ、コード列と貸借列の間で文字が最も多い列、
+  // それも無ければコード列より左を探す(名称→コードの順のレイアウト対応)
   let itemCol = null;
   let bestNames = 0;
   const nameScore = (c) => dataRows.filter((r) => norm(r[c]) !== "" && !isCode(r[c])).length;
-  for (let c = codeCol + 1; c < sideCol; c++) {
-    const n = nameScore(c);
-    if (n > bestNames) { bestNames = n; itemCol = c; }
-  }
-  if (itemCol === null) {
-    for (let c = 0; c < codeCol; c++) {
+  const needNames = Math.min(3, dataRows.length);
+  if (codeCol + 1 < sideCol && nameScore(codeCol + 1) >= needNames) {
+    itemCol = codeCol + 1;
+  } else {
+    for (let c = codeCol + 1; c < sideCol; c++) {
       const n = nameScore(c);
       if (n > bestNames) { bestNames = n; itemCol = c; }
+    }
+    if (itemCol === null) {
+      for (let c = 0; c < codeCol; c++) {
+        const n = nameScore(c);
+        if (n > bestNames) { bestNames = n; itemCol = c; }
+      }
     }
   }
 
@@ -389,14 +401,20 @@ function inferTrialBalanceNoSide(rows) {
   if (Math.max(...lens.values()) < dataRows.length * 0.8) return null;
 
   const width = Math.max(...dataRows.map((r) => r.length));
+  const nameScore = (c) => dataRows.filter((r) => {
+    const v = norm(r[c]);
+    return v !== "" && !isCode(r[c]) && !isAmountLike(r[c]);
+  }).length;
+  // コード列(A列)のすぐ右の列を科目名として最優先で使う
   let itemCol = null;
-  let bestNames = 0;
-  for (let c = 1; c < width; c++) {
-    const n = dataRows.filter((r) => {
-      const v = norm(r[c]);
-      return v !== "" && !isCode(r[c]) && !isAmountLike(r[c]);
-    }).length;
-    if (n > bestNames) { bestNames = n; itemCol = c; }
+  let bestNames = nameScore(1);
+  if (bestNames >= Math.min(3, dataRows.length)) {
+    itemCol = 1;
+  } else {
+    for (let c = 1; c < width; c++) {
+      const n = nameScore(c);
+      if (n > bestNames) { bestNames = n; itemCol = c; }
+    }
   }
   if (itemCol === null || bestNames < Math.min(3, dataRows.length)) return null;
 
