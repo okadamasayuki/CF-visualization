@@ -327,13 +327,29 @@
           社内の勘定科目が一般的な名前と違う場合に使います。「どの科目を、どの項目に、+と−のどちらで反映するか」だけを
           定義したCSV(金額・会社・会計期間は書かない)を読み込ませると、組み込みの対応より優先して
           CF計算書・財務指標・全社比較のすべてに反映されます。
-          まず「現在の算定ロジックをダウンロード」で今の対応表を取り出し、科目名を書き替えて読み込ませてください。
+          「マッピングを画面で編集」なら、区分を選ぶとその区分の項目だけが選択肢に出るので、書き間違いなく作れます。
+          CSVで作る場合は「現在の算定ロジックをダウンロード」で今の対応表を取り出し、科目名を書き替えて読み込ませてください。
         </p>
         <div class="toolbar">
-          <button id="btn-mapping-template" type="button" class="btn">現在の算定ロジックをCSVでダウンロード</button>
+          <button id="btn-mapping-edit" type="button" class="btn">マッピングを画面で編集</button>
+          <button id="btn-mapping-template" type="button" class="btn btn-secondary">現在の算定ロジックをCSVでダウンロード</button>
           <button id="btn-mapping-upload" type="button" class="btn btn-secondary">マッピングCSVを読み込む</button>
           <input type="file" id="mapping-file-input" accept=".csv,.tsv,.txt,text/csv" hidden>
           <button id="btn-mapping-clear" type="button" class="btn btn-ghost" hidden>マッピングを解除</button>
+        </div>
+        <div id="mapping-editor" hidden>
+          <p class="hint">社内の科目名(またはコード)を入力し、反映先と符号を選ぶだけです。
+            区分を選ぶと、その区分にある項目だけが選択肢に出ます。
+            同じ科目の行を複数作ると、複数の項目へ同時に反映されます。</p>
+          <div class="map-head">
+            <span>社内の科目名・コード</span><span>反映先の区分</span><span>反映先の科目</span><span>符号</span><span></span>
+          </div>
+          <div id="mapping-editor-rows"></div>
+          <div class="toolbar">
+            <button id="btn-mapping-row-add" type="button" class="btn btn-ghost">+ 行を追加</button>
+            <button id="btn-mapping-apply" type="button" class="btn">この内容を適用する</button>
+            <button id="btn-mapping-edit-close" type="button" class="btn btn-ghost">閉じる</button>
+          </div>
         </div>
         <p id="mapping-status" class="file-status" hidden></p>
         <details class="format-help">

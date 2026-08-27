@@ -2194,7 +2194,105 @@ async function handleMappingFile(fileList) {
   document.getElementById("mapping-file-input").value = "";
 }
 
+/* ---- マッピングの画面編集(書き間違い防止のプルダウン形式) ---- */
+
+const MAPPING_EDIT_SECTIONS = ["bs", "pl", "sup", "ss", "detail"];
+
+function mappingTargetsFor(section) {
+  return SCHEMA[section].filter((f) => !f.aliasOnly).map((f) => f.label);
+}
+
+function addMappingEditorRow(vals) {
+  const v = vals || { name: "", section: "bs", target: "", sign: 1 };
+  const rows = document.getElementById("mapping-editor-rows");
+  const row = el("div", { class: "map-row" });
+
+  const name = el("input", { type: "text", class: "map-name", placeholder: "例: 買掛金(損益分) / 11010001" });
+  name.value = v.name;
+
+  const sec = el("select", { class: "map-section", "aria-label": "反映先の区分" });
+  for (const s of MAPPING_EDIT_SECTIONS) sec.appendChild(el("option", { value: s, text: SECTION_LABELS[s] }));
+  sec.value = v.section;
+
+  const target = el("select", { class: "map-target", "aria-label": "反映先の科目" });
+  const fillTargets = (section, selected) => {
+    target.innerHTML = "";
+    target.appendChild(el("option", { value: "", text: "科目を選択…" }));
+    for (const label of mappingTargetsFor(section)) {
+      target.appendChild(el("option", { value: label, text: label }));
+    }
+    target.value = selected || "";
+  };
+  fillTargets(v.section, v.target);
+  sec.addEventListener("change", () => fillTargets(sec.value, ""));
+
+  const sign = el("select", { class: "map-sign", "aria-label": "符号" });
+  sign.appendChild(el("option", { value: "+", text: "+(足す)" }));
+  sign.appendChild(el("option", { value: "-", text: "−(引く)" }));
+  sign.value = v.sign < 0 ? "-" : "+";
+
+  const del = el("button", { type: "button", class: "map-del", text: "×", title: "この行を削除" });
+  del.addEventListener("click", () => row.remove());
+
+  row.append(name, sec, target, sign, del);
+  rows.appendChild(row);
+  return row;
+}
+
+/** いまのマッピングを行として並べる(なければ空の1行) */
+function openMappingEditor() {
+  const rows = document.getElementById("mapping-editor-rows");
+  rows.innerHTML = "";
+  if (state.mapping) {
+    for (const targets of state.mapping.entries.values()) {
+      for (const t of targets) {
+        const field = SCHEMA[t.section].find((f) => f.key === t.key && !f.aliasOnly);
+        addMappingEditorRow({ name: t.name, section: t.section, target: field ? field.label : "", sign: t.sign });
+      }
+    }
+  }
+  if (!rows.children.length) addMappingEditorRow();
+  document.getElementById("mapping-editor").hidden = false;
+}
+
+/** 編集内容をCSVにして、ファイル読み込みと同じ経路で適用する */
+function applyMappingEditor() {
+  const q = (s) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  const lines = ["科目,反映先の区分,反映先の科目,符号"];
+  const problems = [];
+  document.querySelectorAll("#mapping-editor-rows .map-row").forEach((row, i) => {
+    const name = row.querySelector(".map-name").value.trim();
+    const target = row.querySelector(".map-target").value;
+    if (name === "" && target === "") return; // 何も入れていない行は無視
+    if (name === "") { problems.push(`${i + 1}行目: 科目名が空です。`); return; }
+    if (target === "") { problems.push(`${i + 1}行目「${name}」: 反映先の科目を選んでください。`); return; }
+    const section = row.querySelector(".map-section").value;
+    const sign = row.querySelector(".map-sign").value;
+    lines.push(`${q(name)},${SECTION_LABELS[section]},${q(target)},${sign}`);
+  });
+  if (problems.length) { mappingStatus(`適用できません: ${problems.join(" ")}`, "ng"); return; }
+  if (lines.length === 1) { mappingStatus("行がありません。科目を1行以上入力してください。", "ng"); return; }
+  if (!setMapping(lines.join("\r\n") + "\r\n")) return;
+  const n = state.mapping.entries.size;
+  if (state.sources.length) {
+    applySources(state.sources, { keepModalOpen: true });
+    mappingStatus(`${n}科目のマッピングを適用し、読み込み済みのデータを再計算しました。`, "ok");
+  } else {
+    mappingStatus(`${n}科目のマッピングを適用しました。次にCSVを読み込むと適用されます。`, "ok");
+  }
+  saveState();
+}
+
 function bindMappingUI() {
+  document.getElementById("btn-mapping-edit").addEventListener("click", () => {
+    const ed = document.getElementById("mapping-editor");
+    if (ed.hidden) openMappingEditor(); else ed.hidden = true;
+  });
+  document.getElementById("btn-mapping-row-add").addEventListener("click", () => addMappingEditorRow());
+  document.getElementById("btn-mapping-apply").addEventListener("click", applyMappingEditor);
+  document.getElementById("btn-mapping-edit-close").addEventListener("click", () => {
+    document.getElementById("mapping-editor").hidden = true;
+  });
   document.getElementById("btn-mapping-template").addEventListener("click", () => {
     downloadText("cf-mapping.csv", state.mappingText || buildMappingTemplate());
   });

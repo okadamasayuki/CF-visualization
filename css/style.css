@@ -730,6 +730,46 @@ tr.has-note { cursor: help; }
 }
 #share-card .toolbar { margin-top: 0; }
 #share-card .field.checkbox { margin-top: 10px; }
+/* ---- マッピングの画面編集 ---- */
+#mapping-editor { margin: 4px 0 12px; }
+.map-head, .map-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.3fr) 92px minmax(170px, 1.7fr) 100px 30px;
+  gap: 6px;
+  align-items: center;
+}
+.map-head { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+#mapping-editor-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.map-row input, .map-row select {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--grid);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+}
+.map-row input:focus, .map-row select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.map-del {
+  border: 1px solid var(--grid);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 4px 0;
+  font: inherit;
+}
+.map-del:hover { color: #c0392b; border-color: #c0392b; }
+@media (max-width: 640px) {
+  .map-head { display: none; }
+  .map-row { grid-template-columns: 1fr 1fr 30px; }
+  .map-row .map-name { grid-column: 1 / -1; }
+  .map-row .map-target { grid-column: 1 / 2; }
+}
+
 .share-locate { margin: 0 0 10px; }
 .share-locate .toolbar { margin-bottom: 8px; }
 .share-locate .hint { margin: 0; }
