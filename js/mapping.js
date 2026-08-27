@@ -27,7 +27,7 @@
 function mappingKey(s) {
   const k = String(s == null ? "" : s)
     .normalize("NFKC")
-    .replace(/[\s　]/g, "")
+    .replace(/[\s　\u200B-\u200D\uFEFF\u00AD]/g, "")
     .toLowerCase();
   const m = k.match(/^0*(\d+)(?:\.0+)?$/);
   return m ? m[1] : k;

@@ -12,12 +12,12 @@
 
 /* ---------- 文字列の正規化 ---------- */
 
-/** 科目名・見出しの照合用キー(全角半角・空白・括弧書きの揺れを吸収) */
+/** 科目名・見出しの照合用キー(全角半角・空白・括弧書き・不可視文字の揺れを吸収) */
 function normalizeKey(s) {
   return String(s == null ? "" : s)
     .normalize("NFKC")
     .replace(/\([^)]*\)/g, "")      // 括弧書きの注記を除去
-    .replace(/[\s　]/g, "")     // 空白を除去
+    .replace(/[\s　\u200B-\u200D\uFEFF\u00AD]/g, "") // 空白・不可視文字を除去
     .replace(/[:：]$/, "")
     .toLowerCase();
 }
@@ -128,16 +128,21 @@ function parsePeriod(raw) {
 
 /* ---------- 文字コードの判定とデコード ---------- */
 
+/** 不可視文字(ゼロ幅スペース等)を取り除く。数字や名前の照合が狂う原因になる */
+function stripInvisible(text) {
+  return text.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "").replace(/\u00A0/g, " ");
+}
+
 async function decodeFile(file) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-    return new TextDecoder("utf-8").decode(bytes.subarray(3));
+    return stripInvisible(new TextDecoder("utf-8").decode(bytes.subarray(3)));
   }
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return stripInvisible(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch (_) {
     // UTF-8として不正 → Excelが出力するShift_JISとみなす
-    return new TextDecoder("shift_jis").decode(bytes);
+    return stripInvisible(new TextDecoder("shift_jis").decode(bytes));
   }
 }
 
@@ -539,6 +544,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     if (layout.trialBalance && !/^\d{3,10}(\.0+)?$/.test(rawCode.normalize("NFKC"))) continue;
     // 試算表形式で名前の列が推定と違っていた場合の保険:
     // コード・貸借・金額のどれでもない最初の文字セルを科目名として使う
+    let fallbackCol = null;
     if (layout.trialBalance && rawItem === "") {
       for (let c = 0; c < row.length; c++) {
         if (c === cols.code || c === cols.prev || c === cols.curr) continue;
@@ -547,9 +553,14 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
         const n = cell.normalize("NFKC");
         if (/^\d{3,10}(\.0+)?$/.test(n) || TB_SIDE_RE.test(n) || isAmountLike(cell)) continue;
         rawName = cell;
+        fallbackCol = c;
         break;
       }
     }
+    // 表示名がどの列から来たか(読み取りの診断用)
+    const nameSrc = rawItem !== "" ? cols.item
+      : fallbackCol !== null ? fallbackCol
+      : rawName === rawCode ? cols.code : cols.item;
 
     // 会社名・四半期が空のセルは直前の行から引き継ぐ(先頭行にだけ書く表に対応)
     if (cols.company !== null) {
@@ -611,7 +622,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     if (!target) {
       // 合計行など、金額のない見出し行はそっと無視する
       const hasAmount = [cols.prev, cols.curr].some((c) => c !== null && isAmountLike(row[c]));
-      if (hasAmount) unmatched.push({ line: lineNo, name: rawName });
+      if (hasAmount) unmatched.push({ line: lineNo, name: rawName, src: nameSrc });
       continue;
     }
     recognized++;
@@ -687,12 +698,20 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     );
   }
 
+  // 認識できなかった科目の表示名が、どの列から来たかの集計(診断用)
+  const nameSources = {};
+  for (const u of unmatched) {
+    const col = u.src === null || u.src === undefined ? "?" : `${colLetter(u.src)}列`;
+    nameSources[col] = (nameSources[col] || 0) + 1;
+  }
+
   return {
     datasets: [...datasets.values()],
     ok: errors.length === 0, errors, warnings, matched, recognized, unmatched,
     resolved: [...resolved.values()],
     layoutInfo: describeLayout(layout),
     layoutRows: layoutDebugRows(rows),
+    nameSources,
   };
 }
 

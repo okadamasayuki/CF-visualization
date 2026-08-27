@@ -2033,7 +2033,10 @@ function applySources(sources, { keepModalOpen = false } = {}) {
       layoutCounts.set(result.layoutInfo, (layoutCounts.get(result.layoutInfo) || 0) + 1);
     }
     if (result.layoutRows && layoutDebug.length < 3) {
-      layoutDebug.push({ file: src.name, lines: result.layoutRows });
+      const srcNote = Object.entries(result.nameSources || {})
+        .map(([col, n]) => `${col}×${n}件`).join(" / ");
+      layoutDebug.push({ file: src.name, lines: result.layoutRows,
+        srcNote: srcNote ? `→ 認識できなかった科目名の出どころ: ${srcNote}` : "" });
     }
     // Excel読み込み時に「読めなかったセル」があった場合の説明(数式のまま等)
     if (src.note) warnings.push((sources.length > 1 ? `${src.name}: ` : "") + src.note);
@@ -2273,8 +2276,7 @@ function renderResolveReport() {
   if (dbg) {
     const files = state.layoutDebug || [];
     dbg.hidden = files.length === 0;
-    document.getElementById("resolve-debug-pre").textContent =
-      files.map((f) => `【${f.file}】\n${f.lines.join("\n")}`).join("\n\n");
+    document.getElementById("resolve-debug-pre").textContent = debugReportText();
   }
 
   const fieldLabel = (t) => {
@@ -2299,6 +2301,21 @@ function renderResolveReport() {
       addRow(i === 0 ? it.name : "〃", fieldLabel(t), t.sign < 0 ? "−" : "+", it.via, i > 0);
     });
   }
+}
+
+/** 読み取りの診断の本文(読み取り方 + セル種類 + 名前の出どころ)。コピー共有用 */
+function debugReportText() {
+  const parts = [];
+  if (state.layoutNotes && state.layoutNotes.length) {
+    parts.push(`読み取り方: ${state.layoutNotes.join(" / ")}`);
+  }
+  for (const f of state.layoutDebug || []) {
+    parts.push(`【${f.file}】`);
+    parts.push(...f.lines);
+    if (f.srcNote) parts.push(f.srcNote);
+    parts.push("");
+  }
+  return parts.join("\n").trim();
 }
 
 /* ---- マッピングの画面編集(書き間違い防止のプルダウン形式) ---- */
@@ -2842,6 +2859,20 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   document.getElementById("btn-template")
     .addEventListener("click", () => downloadText("cf-template.csv", buildTemplateCSV()));
+  // 読み取りの診断をコピー(科目名・金額を含まないので、そのまま問い合わせに貼れる)
+  document.getElementById("btn-debug-copy")
+    .addEventListener("click", async () => {
+      const text = debugReportText();
+      if (!text) return;
+      const status = document.getElementById("debug-copy-status");
+      try {
+        await navigator.clipboard.writeText(text);
+        status.textContent = "コピーしました。そのまま貼り付けて共有できます。";
+      } catch (_) {
+        window.prompt("この内容をコピーしてください:", text);
+        status.textContent = "";
+      }
+    });
   document.getElementById("btn-export")
     .addEventListener("click", () => {
       if (state.datasets.length) downloadText("cf-input.csv", buildTemplateCSV(state.datasets));

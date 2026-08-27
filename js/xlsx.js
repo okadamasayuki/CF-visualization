@@ -144,6 +144,9 @@ function xlsxParseSheet(xml, shared, stats = {}) {
           val = raw;
         }
       }
+      // 目に見えない文字を取り除く(ゼロ幅スペース等)。これが科目コードや
+      // 科目名に混ざっていると、数字なのに文字と判定されて列の推定が狂う
+      if (val) val = val.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "").replace(/\u00A0/g, " ");
       while (r.length < at) r.push("");
       r[at] = val;
     }
