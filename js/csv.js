@@ -236,6 +236,64 @@ function findHeader(rows) {
 const TB_SIDE_RE = /^(借方?|貸方?)(残高)?$/;
 
 /**
+ * 見出し行から決めた列割りを、実際のデータで検証して補正する。
+ * 会計システムの残高試算表では、
+ *   - 科目名の列に見出しが無い(結合セルで空になっている等)
+ *   - 「勘定科目」などの見出しがコード列のほうに付いている
+ * ことがあり、そのままだと科目名の列を見失ってコードを名前に使ってしまう。
+ */
+function refineHeaderLayout(rows, layout) {
+  if (!layout || layout.headerRow < 0) return layout;
+  const { cols } = layout;
+  const norm = (v) => String(v == null ? "" : v).normalize("NFKC").trim();
+  const isCode = (v) => /^\d{3,10}(\.0+)?$/.test(norm(v));
+  const data = rows.slice(layout.headerRow + 1);
+  if (data.length === 0) return layout;
+
+  const codeScore = (c) => data.filter((r) => isCode(r[c])).length;
+  const textScore = (c) => data.filter((r) => {
+    const v = norm(r[c]);
+    return v !== "" && !isCode(r[c]) && !TB_SIDE_RE.test(v) && !isAmountLike(r[c]);
+  }).length;
+
+  // 「科目」の見出しがコード列に付いている場合: 中身がほぼ数字コードなら
+  // その列はコード列として扱い、科目名の列は改めて探す
+  if (cols.item !== null) {
+    const nonEmpty = data.filter((r) => norm(r[cols.item]) !== "").length;
+    const codes = codeScore(cols.item);
+    if (codes >= 3 && nonEmpty > 0 && codes >= nonEmpty * 0.8) {
+      if (cols.code === null) cols.code = cols.item;
+      cols.item = null;
+    }
+  }
+
+  // 科目名の見出しが見つかっていない場合: 見出しの割り当てが無い列から、
+  // 名前らしい文字が最も多い列を科目名の列として使う
+  if (cols.item === null && cols.code !== null) {
+    const used = new Set(Object.values(cols).filter((v) => v !== null && v !== undefined));
+    const width = Math.max(...data.map((r) => r.length));
+    let best = null;
+    let bestN = 0;
+    for (let c = 0; c < width; c++) {
+      if (used.has(c)) continue;
+      const n = textScore(c);
+      if (n > bestN) { bestN = n; best = c; }
+    }
+    if (best !== null && bestN >= Math.min(3, data.length)) cols.item = best;
+  }
+
+  // コードが桁ぞろいで並ぶ表は残高試算表として扱う。これにより
+  // コードのない行(小計・見出し)の読み飛ばし、行ごとの科目名の保険、
+  // 上部の「会社名(コード)」「(YYYYMM)」の読み取りが効くようになる
+  if (cols.code !== null) {
+    const codes = codeScore(cols.code);
+    const nonEmpty = data.filter((r) => norm(r[cols.code]) !== "").length;
+    if (codes >= 3 && nonEmpty > 0 && codes >= nonEmpty * 0.8) layout.trialBalance = true;
+  }
+  return layout;
+}
+
+/**
  * 会計システムの残高試算表形式を推定する。
  *   A: 科目コード(数字) / B: 科目名 / C: 貸借(借方・貸方) /
  *   D: 前期末残高 / E: 当四半期末残高 / F: 摘要
@@ -406,7 +464,7 @@ function describeLayout(layout) {
     part("前期末", cols.prev), part("当期末", cols.curr),
   ].filter(Boolean);
   const kind = layout.trialBalance
-    ? "残高試算表形式"
+    ? (layout.headerRow >= 0 ? `残高試算表形式(見出し行${layout.headerRow + 1}行目)` : "残高試算表形式")
     : layout.headerRow >= 0 ? `見出し行あり(${layout.headerRow + 1}行目)` : "列を推定";
   return `${kind}(${parts.join(" / ")})`;
 }
@@ -416,29 +474,37 @@ function trialBalancePreamble(rows) {
   const out = { company: null, period: null };
   const isCodeCell = (v) => /^\d{3,10}(\.0+)?$/.test(String(v == null ? "" : v).normalize("NFKC").trim());
   const isSideCell = (v) => TB_SIDE_RE.test(String(v == null ? "" : v).normalize("NFKC").trim());
+  const pre = [];
   for (let r = 0; r < Math.min(rows.length, 12); r++) {
     // コード + 貸借(または金額)がそろった行が来たら、データ開始とみなして終了
     if (rows[r].some(isCodeCell) && (rows[r].some(isSideCell) || rows[r].some((v) => isAmountLike(v)))) break;
     const joined = rows[r]
       .map((c) => String(c == null ? "" : c).normalize("NFKC").trim())
       .filter(Boolean).join(" ");
-    if (joined === "") continue;
+    if (joined !== "") pre.push(joined);
+  }
 
-    // 期間: 「2026/03 …(202603)」のような行。括弧のYYYYMM、なければ YYYY/MM
-    if (!out.period) {
-      const m = joined.match(/[((]\s*(\d{4})(\d{2})\s*[))]/) ||
-        joined.match(/(\d{4})\s*[/年.-]\s*(\d{1,2})(?:月|\b)/);
-      if (m && +m[2] >= 1 && +m[2] <= 12) {
-        const p = parsePeriod(`${m[1]}-${m[2]}`);
-        if (p && p.year !== null) out.period = { ...p, label: `${m[1]}/${String(+m[2]).padStart(2, "0")}` };
-      }
-    }
-    // 会社名: 「◯◯株式会社(12345)」のような行(期間・単位などの行は除く)
-    if (!out.company) {
-      const m = joined.match(/^(.+?)\s*[((]\s*\d{3,6}\s*[))]/);
-      if (m && !/データ|単位|試算表|残高|期間|年度|月次|四半期/.test(m[1])) {
-        out.company = m[1].trim();
-      }
+  const setPeriod = (m) => {
+    if (!m || +m[2] < 1 || +m[2] > 12) return;
+    const p = parsePeriod(`${m[1]}-${m[2]}`);
+    if (p && p.year !== null) out.period = { ...p, label: `${m[1]}/${String(+m[2]).padStart(2, "0")}` };
+  };
+  // 期間: 「…(202603)」の括弧書きを全行から優先して探し、
+  // 無ければ YYYY/MM 表記(「自 2026/04/01 至 …」の自側を拾わないように)
+  for (const joined of pre) {
+    if (out.period) break;
+    setPeriod(joined.match(/[((]\s*(\d{4})(\d{2})\s*[))]/));
+  }
+  for (const joined of pre) {
+    if (out.period) break;
+    setPeriod(joined.match(/(\d{4})\s*[/年.-]\s*(\d{1,2})(?:月|\b)/));
+  }
+  // 会社名: 「◯◯株式会社(12345)」のような行(期間・単位などの行は除く)
+  for (const joined of pre) {
+    if (out.company) break;
+    const m = joined.match(/^(.+?)\s*[((]\s*\d{3,6}\s*[))]/);
+    if (m && !/データ|単位|試算表|残高|期間|年度|月次|四半期/.test(m[1])) {
+      out.company = m[1].trim();
     }
   }
   return out;
@@ -493,7 +559,8 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
   const rows = parseDelimited(text, detectDelimiter(text));
   if (rows.length === 0) return fail("ファイルが空です。");
 
-  const layout = findHeader(rows) || inferTrialBalanceLayout(rows) || inferLayout(rows, mapping);
+  const layout = refineHeaderLayout(rows, findHeader(rows))
+    || inferTrialBalanceLayout(rows) || inferLayout(rows, mapping);
   if (!layout) {
     return fail("科目名の列を判別できませんでした。1行目に「会社名,区分,科目,前期末,当期末」の見出しを入れてください(テンプレートCSVをご利用ください)。");
   }
