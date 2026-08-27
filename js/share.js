@@ -9,6 +9,7 @@
  *
  * フォルダの中身:
  *   data/<元のファイル名>.csv          読み込んだCSVそのもの
+ *   data/*.xlsx / *.xlsm               Excelを直接置いてもよい(読み込み時に変換)
  *   overrides/<会社>_<四半期>.json     詳細入力(その会社・四半期の上書き値)
  *   settings.json                      表示区分などの設定と最終更新の記録
  *
@@ -192,7 +193,30 @@ async function shareRead(dir) {
   const stamps = new Map();
   const sources = [];
   const dataDir = await getDir(dir, SHARE_DATA_DIR, false);
+
+  // まずExcel(.xlsx / .xlsm)を読む。会計システムの出力をそのまま
+  // フォルダへ置く運用に対応する。シートはCSVに変換して取り込む
+  const fromXlsx = new Set(); // 変換で生まれたファイル名(同名CSVとの二重読み防止)
+  for (const { name, handle } of await listFiles(dataDir, (n) => isXlsxName(n))) {
+    const file = await handle.getFile();
+    stamps.set(`${SHARE_DATA_DIR}/${name}`, file.lastModified);
+    try {
+      const sheets = await readXlsxSheets(await file.arrayBuffer());
+      const base = name.replace(/\.[^.]+$/, "");
+      for (const sh of sheets) {
+        const nm = sheets.length > 1 ? `${base}_${sh.name}.csv` : `${base}.csv`;
+        fromXlsx.add(nm);
+        sources.push({ name: nm, text: xlsxRowsToCSV(sh.rows), note: xlsxSheetNote(sh.stats) });
+      }
+    } catch (err) {
+      // 読めないExcelも「何が起きたか」を画面に出す(空のCSVとして流し、注記を添える)
+      sources.push({ name, text: "", note: `Excelとして読めませんでした: ${err.message}` });
+    }
+  }
+
   for (const { name, handle } of await listFiles(dataDir, (n) => /\.(csv|tsv|txt)$/i.test(n))) {
+    // 同じ名前のExcelから変換済みなら、過去に書き出したCSVのほうは読まない
+    if (fromXlsx.has(name)) continue;
     const file = await handle.getFile();
     sources.push({ name, text: await decodeFile(file) });
     stamps.set(`${SHARE_DATA_DIR}/${name}`, file.lastModified);
@@ -259,7 +283,8 @@ async function shareWrite(dir, payload, { prune = false, by = "", scheme = null 
   }
   if (prune) {
     for (const { name } of await listFiles(dataDir)) {
-      if (!wantData.has(name)) await dataDir.removeEntry(name);
+      // Excelは利用者が置いた元ファイルなので、整理の対象にしない
+      if (!wantData.has(name) && !isXlsxName(name)) await dataDir.removeEntry(name);
     }
   }
   for (const { name, handle } of await listFiles(dataDir)) {

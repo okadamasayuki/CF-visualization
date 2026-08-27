@@ -309,6 +309,12 @@
             <tbody id="resolve-body"></tbody>
           </table>
         </div>
+        <details class="format-help" id="resolve-debug" hidden>
+          <summary>読み取りの診断(セルの種類)</summary>
+          <p class="hint">先頭のほうの各セルを「数字/文字/貸借/金額/空」のどれとして読んだかの一覧です(空の行を除いた行番号)。
+            科目名や金額そのものは含まないため、読み取りがうまくいかないときは、この内容をそのまま伝えてもらえれば原因を特定できます。</p>
+          <pre id="resolve-debug-pre" class="debug-pre"></pre>
+        </details>
       </details>
 
       <details class="format-help">
@@ -458,7 +464,7 @@
             <summary>フォルダの中身と、共同利用のときの注意</summary>
             <p>指定したフォルダの中に、次の構成で読み書きします。専用のフォルダを指定してください。</p>
 <pre><code>&lt;共有フォルダ&gt;/
-  data/         読み込んだCSVをそのまま置きます
+  data/         読み込んだCSVをそのまま置きます(Excelを直接置いてもOK)
   overrides/    詳細入力を 会社×四半期ごとのJSONで置きます
   mapping.csv   科目マッピング(読み込んでいるときだけ)
   settings.json 表示区分・フォルダの場所などの設定と、最終更新の記録</code></pre>

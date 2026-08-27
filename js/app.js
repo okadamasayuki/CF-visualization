@@ -2025,11 +2025,18 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   // ファイルをどう読んだか(読み取り方)の記録。同じ判定はまとめる
   const layoutCounts = new Map();
 
+  const layoutDebug = [];
+
   for (const src of sources) {
     const result = parseFinancialCSV(src.text, baseName(src.name), state.mapping);
     if (result.layoutInfo) {
       layoutCounts.set(result.layoutInfo, (layoutCounts.get(result.layoutInfo) || 0) + 1);
     }
+    if (result.layoutRows && layoutDebug.length < 3) {
+      layoutDebug.push({ file: src.name, lines: result.layoutRows });
+    }
+    // Excel読み込み時に「読めなかったセル」があった場合の説明(数式のまま等)
+    if (src.note) warnings.push((sources.length > 1 ? `${src.name}: ` : "") + src.note);
     const prefix = sources.length > 1 ? `${src.name}: ` : "";
     errors.push(...result.errors.map((e) => prefix + e));
     warnings.push(...result.warnings.map((w) => prefix + w));
@@ -2064,6 +2071,7 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   state.resolvedNames = [...resolvedNames.values()];
   state.layoutNotes = [...layoutCounts].map(([desc, n]) =>
     sources.length > 1 ? `${desc} × ${n}ファイル` : desc);
+  state.layoutDebug = layoutDebug;
   renderResolveReport();
 
   const label = sources.length === 1 ? sources[0].name : `${sources.length}個のファイル`;
@@ -2124,7 +2132,8 @@ async function handleFiles(fileList) {
         const base = baseName(f.name);
         for (const sh of sheets) {
           const nm = sheets.length > 1 ? `${base}_${sh.name}.csv` : `${base}.csv`;
-          sources.push({ name: nm, text: xlsxRowsToCSV(sh.rows) });
+          // 読めなかったセルがある場合の説明(数式のまま保存されている等)を添える
+          sources.push({ name: nm, text: xlsxRowsToCSV(sh.rows), note: xlsxSheetNote(sh.stats) });
         }
       } else if (/\.xls$/i.test(f.name)) {
         throw new Error("旧形式(.xls)は読み込めません。Excelで .xlsx として保存し直してください");
@@ -2150,6 +2159,7 @@ function clearAll() {
   state.unmatchedNames = [];
   state.resolvedNames = [];
   state.layoutNotes = [];
+  state.layoutDebug = [];
   renderResolveReport();
   document.getElementById("file-input").value = "";
   document.getElementById("file-status").hidden = true;
@@ -2257,6 +2267,14 @@ function renderResolveReport() {
     const notes = state.layoutNotes || [];
     layouts.hidden = notes.length === 0;
     layouts.textContent = notes.length ? `読み取り方: ${notes.join(" / ")}` : "";
+  }
+  // セル種類の診断(科目名・金額は含まない)
+  const dbg = document.getElementById("resolve-debug");
+  if (dbg) {
+    const files = state.layoutDebug || [];
+    dbg.hidden = files.length === 0;
+    document.getElementById("resolve-debug-pre").textContent =
+      files.map((f) => `【${f.file}】\n${f.lines.join("\n")}`).join("\n\n");
   }
 
   const fieldLabel = (t) => {

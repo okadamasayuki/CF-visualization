@@ -79,9 +79,21 @@ function xlsxTags(node, name) {
   return [...node.getElementsByTagNameNS("*", name)];
 }
 
-/** <is>や<si>の中の <t> を連結する(リッチテキスト対応) */
+/**
+ * <is>や<si>の中の <t> を連結する(リッチテキスト対応)。
+ * 日本語のExcelは文字列にふりがな(<rPh>…</rPh>)を持つことが多く、
+ * そのまま連結すると「売掛金ウリカケキン」のようになってしまうため、
+ * rPh の中の <t> は除外する。
+ */
 function xlsxTextOf(node) {
-  return xlsxTags(node, "t").map((t) => t.textContent).join("");
+  return xlsxTags(node, "t")
+    .filter((t) => {
+      for (let p = t.parentNode; p && p !== node; p = p.parentNode) {
+        if (p.localName === "rPh") return false;
+      }
+      return true;
+    })
+    .map((t) => t.textContent).join("");
 }
 
 /** "AB12" → 列番号 27(0始まり)。列参照がない場合は null */
@@ -93,8 +105,13 @@ function xlsxColIndex(ref) {
   return col - 1;
 }
 
-/** シートXML → 行×列の二次元配列(文字列) */
-function xlsxParseSheet(xml, shared) {
+/**
+ * シートXML → 行×列の二次元配列(文字列)。
+ * stats には読めなかったセルの内訳を記録する(原因の診断用):
+ *   formulaNoValue: 数式のまま計算結果が保存されていないセル
+ *   sharedMiss:     共有文字列の参照先が見つからないセル
+ */
+function xlsxParseSheet(xml, shared, stats = {}) {
   const doc = new DOMParser().parseFromString(xml, "application/xml");
   const rows = [];
   for (const rowEl of xlsxTags(doc, "row")) {
@@ -110,9 +127,22 @@ function xlsxParseSheet(xml, shared) {
       } else {
         const v = xlsxTags(c, "v")[0];
         const raw = v ? v.textContent : "";
-        if (t === "s") val = shared[Number(raw)] ?? "";
-        else if (t === "b") val = raw === "1" ? "TRUE" : "FALSE";
-        else val = raw;
+        if (t === "s") {
+          val = shared[Number(raw)];
+          if (val === undefined) { val = ""; stats.sharedMiss = (stats.sharedMiss || 0) + 1; }
+        } else if (t === "b") {
+          val = raw === "1" ? "TRUE" : "FALSE";
+        } else if (raw.trim() === "" && xlsxTags(c, "f").length > 0) {
+          // 数式セルなのに計算結果(<v>)が無い(または空)。出力ツールに
+          // よっては値を保存しないことがあり、この場合は中身を読めない
+          stats.formulaNoValue = (stats.formulaNoValue || 0) + 1;
+          val = "";
+        } else if (t === "n" && /[eE]/.test(raw) && Number.isFinite(Number(raw))) {
+          // 指数表記(1.130001E6 など)は普通の数字に直す
+          val = String(Number(raw));
+        } else {
+          val = raw;
+        }
       }
       while (r.length < at) r.push("");
       r[at] = val;
@@ -132,18 +162,12 @@ async function readXlsxSheets(arrayBuffer) {
   }
   const zip = xlsxZipEntries(arrayBuffer);
 
-  const sharedXml = await xlsxZipText(zip, "xl/sharedStrings.xml");
-  const shared = [];
-  if (sharedXml) {
-    const doc = new DOMParser().parseFromString(sharedXml, "application/xml");
-    for (const si of xlsxTags(doc, "si")) shared.push(xlsxTextOf(si));
-  }
-
   // workbook.xml のシート一覧(表示順)と、rels の rId → ファイルパス
   const wbXml = await xlsxZipText(zip, "xl/workbook.xml");
   const relXml = await xlsxZipText(zip, "xl/_rels/workbook.xml.rels");
   if (!wbXml) throw new Error("Excelのブック情報(workbook.xml)が見つかりません");
   const relMap = new Map();
+  let sharedPath = "xl/sharedStrings.xml";
   if (relXml) {
     const relDoc = new DOMParser().parseFromString(relXml, "application/xml");
     for (const rel of xlsxTags(relDoc, "Relationship")) {
@@ -151,7 +175,16 @@ async function readXlsxSheets(arrayBuffer) {
       if (target.startsWith("/")) target = target.slice(1);
       else target = "xl/" + target.replace(/^\.\//, "");
       relMap.set(rel.getAttribute("Id"), target);
+      // 共有文字列の置き場所は固定とは限らないため、rels から実際のパスを引く
+      if (/\/sharedStrings$/.test(rel.getAttribute("Type") || "")) sharedPath = target;
     }
+  }
+
+  const sharedXml = await xlsxZipText(zip, sharedPath) || await xlsxZipText(zip, "xl/sharedStrings.xml");
+  const shared = [];
+  if (sharedXml) {
+    const doc = new DOMParser().parseFromString(sharedXml, "application/xml");
+    for (const si of xlsxTags(doc, "si")) shared.push(xlsxTextOf(si));
   }
   const wbDoc = new DOMParser().parseFromString(wbXml, "application/xml");
   const defs = [];
@@ -170,12 +203,27 @@ async function readXlsxSheets(arrayBuffer) {
   for (const def of defs) {
     const xml = await xlsxZipText(zip, def.path);
     if (!xml) continue;
-    const rows = xlsxParseSheet(xml, shared);
+    const stats = {};
+    const rows = xlsxParseSheet(xml, shared, stats);
     if (rows.some((r) => r.some((c) => String(c).trim() !== ""))) {
-      sheets.push({ name: def.name, rows });
+      sheets.push({ name: def.name, rows, stats });
     }
   }
   return sheets;
+}
+
+/** 読めなかったセルがあるシートについて、原因と対処の説明文を作る(無ければ null) */
+function xlsxSheetNote(stats) {
+  if (!stats) return null;
+  const notes = [];
+  if (stats.formulaNoValue > 0) {
+    notes.push(`${stats.formulaNoValue}個のセルが数式のままで、計算結果がファイルに保存されていません(科目名などが空欄として読まれる原因になります)。` +
+      "Excelでこのファイルを開き、そのまま上書き保存してから読み込み直してください(保存すると計算結果もファイルに入ります)");
+  }
+  if (stats.sharedMiss > 0) {
+    notes.push(`${stats.sharedMiss}個の文字セルの参照先が見つかりませんでした。Excelで開いて「.xlsx」として保存し直してから読み込んでください`);
+  }
+  return notes.length ? notes.join("。") + "。" : null;
 }
 
 /** 行×列の配列を、既存の取り込み経路に流せるCSVテキストにする */

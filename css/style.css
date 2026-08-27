@@ -149,6 +149,7 @@ main { max-width: var(--page-width); margin: 0 auto; padding: 0 20px 48px; }
   margin: 8px 0;
 }
 .format-help code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.debug-pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.7; }
 
 .section-title { font-size: 15px; margin: 24px 0 10px; }
 .count-badge {

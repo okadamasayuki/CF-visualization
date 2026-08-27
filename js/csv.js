@@ -364,6 +364,33 @@ function colLetter(c) {
   return s;
 }
 
+/**
+ * 診断用: 先頭のほうの行について、各セルを「コード/文字/貸借/金額/空」の
+ * どれとして読んだかだけを並べる。科目名や金額そのものは含まないので、
+ * 社内情報を出さずに読み取りの状態を確認・共有できる。
+ */
+function layoutDebugRows(rows) {
+  const kind = (v) => {
+    const s = String(v == null ? "" : v).trim();
+    if (s === "") return "空";
+    const n = s.normalize("NFKC");
+    // 桁だけの値はコードとも金額とも取れるため「数字」とだけ示す
+    if (/^\d+(\.0+)?$/.test(n)) return "数字";
+    if (TB_SIDE_RE.test(n)) return "貸借";
+    if (isAmountLike(s)) return "金額";
+    return "文字";
+  };
+  const out = [];
+  for (let r = 0; r < rows.length && out.length < 12; r++) {
+    const cells = [];
+    for (let c = 0; c < Math.min(rows[r].length, 10); c++) {
+      cells.push(`${colLetter(c)}=${kind(rows[r][c])}`);
+    }
+    out.push(`${r + 1}行目: ${cells.join(" ")}`);
+  }
+  return out;
+}
+
 /** どの列をどう読んだかの説明文(読み込み内訳・エラー表示用) */
 function describeLayout(layout) {
   if (!layout) return "";
@@ -641,6 +668,17 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     // 原因を特定しやすいよう、どの列をどう読もうとしたかを添える
     warnings.push(`読み取り方: ${describeLayout(layout)}`);
   }
+  // 科目名がすべて数字(=コードを名前に使った)場合、原因として最も多い
+  // 「科目名の列が数式のまま保存されている」ケースの対処を案内する
+  if (layout.trialBalance && unmatched.length > 0 &&
+      unmatched.every((u) => /^\d+(\.0+)?$/.test(u.name.normalize("NFKC")))) {
+    warnings.push("科目名の列に文字が見つからなかったため、科目コードを名前として表示しています。" +
+      "Excelで科目名の列が数式(他のシートやマスタを参照する式)になっていると、" +
+      "計算結果がファイルに保存されておらず空欄として読まれることがあります。" +
+      "その場合はExcelでこのファイルを開き、そのまま上書き保存してから読み込み直してください。" +
+      "なお、コードのままでも「マッピングを画面で編集」で反映先を選べばそのまま読み込めます。" +
+      "「科目の読み込み内訳」の中の「読み取りの診断」で、各セルがどう見えているかを確認できます。");
+  }
   if (unmatched.length > 0) {
     warnings.push(
       `次の${unmatched.length}件の科目は認識できなかったため読み飛ばしました: ` +
@@ -654,6 +692,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     ok: errors.length === 0, errors, warnings, matched, recognized, unmatched,
     resolved: [...resolved.values()],
     layoutInfo: describeLayout(layout),
+    layoutRows: layoutDebugRows(rows),
   };
 }
 
