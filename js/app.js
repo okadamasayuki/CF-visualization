@@ -47,6 +47,7 @@ const state = {
   mapping: null,          // parseMappingCSV の結果(entries)
   unmatchedNames: [],     // 読み込みで認識できなかった科目(マッピング編集の候補)
   resolvedNames: [],      // 読み込みで各科目をどう解釈したかの記録(読み込み内訳)
+  layoutNotes: [],        // 各ファイルをどう読んだか(読み取り方)の記録
   interestPolicy: INTEREST_POLICY_DEFAULT,
 };
 
@@ -2021,9 +2022,14 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   const unmatchedNames = new Map(); // mappingKey → 元の表記
   // 科目ごとの解釈の記録(読み込み内訳の表示用)
   const resolvedNames = new Map();
+  // ファイルをどう読んだか(読み取り方)の記録。同じ判定はまとめる
+  const layoutCounts = new Map();
 
   for (const src of sources) {
     const result = parseFinancialCSV(src.text, baseName(src.name), state.mapping);
+    if (result.layoutInfo) {
+      layoutCounts.set(result.layoutInfo, (layoutCounts.get(result.layoutInfo) || 0) + 1);
+    }
     const prefix = sources.length > 1 ? `${src.name}: ` : "";
     errors.push(...result.errors.map((e) => prefix + e));
     warnings.push(...result.warnings.map((w) => prefix + w));
@@ -2056,6 +2062,8 @@ function applySources(sources, { keepModalOpen = false } = {}) {
 
   state.unmatchedNames = [...unmatchedNames.values()];
   state.resolvedNames = [...resolvedNames.values()];
+  state.layoutNotes = [...layoutCounts].map(([desc, n]) =>
+    sources.length > 1 ? `${desc} × ${n}ファイル` : desc);
   renderResolveReport();
 
   const label = sources.length === 1 ? sources[0].name : `${sources.length}個のファイル`;
@@ -2141,6 +2149,7 @@ function clearAll() {
   state.overrides = {};
   state.unmatchedNames = [];
   state.resolvedNames = [];
+  state.layoutNotes = [];
   renderResolveReport();
   document.getElementById("file-input").value = "";
   document.getElementById("file-status").hidden = true;
@@ -2242,6 +2251,13 @@ function renderResolveReport() {
   document.getElementById("resolve-summary").textContent =
     `科目の読み込み内訳を確認(${items.length + un.length}科目` +
     (un.length ? ` / うち認識できず ${un.length}件` : "") + ")";
+  // どの列をどう読んだか(問い合わせ時にこの行を伝えてもらうと原因を特定できる)
+  const layouts = document.getElementById("resolve-layouts");
+  if (layouts) {
+    const notes = state.layoutNotes || [];
+    layouts.hidden = notes.length === 0;
+    layouts.textContent = notes.length ? `読み取り方: ${notes.join(" / ")}` : "";
+  }
 
   const fieldLabel = (t) => {
     const f = SCHEMA[t.section].find((g) => g.key === t.key && !g.aliasOnly);

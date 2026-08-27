@@ -227,6 +227,9 @@ function findHeader(rows) {
   return null;
 }
 
+/** 貸借の列の表記(借方/貸方のほか、借・貸・借方残高などの揺れも受ける) */
+const TB_SIDE_RE = /^(借方?|貸方?)(残高)?$/;
+
 /**
  * 会計システムの残高試算表形式を推定する。
  *   A: 科目コード(数字) / B: 科目名 / C: 貸借(借方・貸方) /
@@ -238,7 +241,7 @@ function findHeader(rows) {
 function inferTrialBalanceLayout(rows) {
   const norm = (v) => String(v == null ? "" : v).normalize("NFKC").trim();
   const isCode = (v) => /^\d{3,10}(\.0+)?$/.test(norm(v));
-  const isSide = (v) => /^(借方?|貸方?)$/.test(norm(v));
+  const isSide = (v) => TB_SIDE_RE.test(norm(v));
 
   // 各行で「最初のコード列」と「貸借列」を探し、多数決で列位置を決める
   // (会計システムによって間に空列や補助科目列が挟まることがあるため、位置は決め打ちしない)
@@ -260,7 +263,9 @@ function inferTrialBalanceLayout(rows) {
   for (const [key, list] of votes) {
     if (!best || list.length > votes.get(best).length) best = key;
   }
-  if (!best || votes.get(best).length < 3) return null;
+  // 貸借の列が見つからない(または表記が想定外)場合は、
+  // 「A列が桁のそろった数字コード」の形として判定を試みる
+  if (!best || votes.get(best).length < 3) return inferTrialBalanceNoSide(rows);
   const [codeCol, sideCol] = best.split(":").map(Number);
   const dataRows = votes.get(best);
 
@@ -293,21 +298,95 @@ function inferTrialBalanceLayout(rows) {
     trialBalance: true,
     cols: {
       company: null, period: null, section: null,
-      item: itemCol, code: codeCol,
+      item: itemCol, code: codeCol, side: sideCol,
       prev: amountCols.length >= 2 ? amountCols[0] : null,
       curr: amountCols.length >= 2 ? amountCols[1] : amountCols[0],
     },
   };
 }
 
+/**
+ * 貸借の列がない(または「借方/貸方」以外の表記の)残高試算表の判定。
+ * 誤検出を避けるため、条件を絞る:
+ *   - 先頭列(A列)が4〜10桁の数字コードの行が5行以上
+ *   - コードの桁数が8割以上の行でそろっている(金額の列との誤認防止)
+ *   - コード列の後に科目名の列(コードでも金額でもない文字)がある
+ */
+function inferTrialBalanceNoSide(rows) {
+  const norm = (v) => String(v == null ? "" : v).normalize("NFKC").trim();
+  const isCode = (v) => /^\d{4,10}(\.0+)?$/.test(norm(v));
+
+  const dataRows = rows.filter((r) => isCode(r[0]));
+  if (dataRows.length < 5) return null;
+  const lens = new Map();
+  for (const r of dataRows) {
+    const L = norm(r[0]).replace(/\.0+$/, "").length;
+    lens.set(L, (lens.get(L) || 0) + 1);
+  }
+  if (Math.max(...lens.values()) < dataRows.length * 0.8) return null;
+
+  const width = Math.max(...dataRows.map((r) => r.length));
+  let itemCol = null;
+  let bestNames = 0;
+  for (let c = 1; c < width; c++) {
+    const n = dataRows.filter((r) => {
+      const v = norm(r[c]);
+      return v !== "" && !isCode(r[c]) && !isAmountLike(r[c]);
+    }).length;
+    if (n > bestNames) { bestNames = n; itemCol = c; }
+  }
+  if (itemCol === null || bestNames < Math.min(3, dataRows.length)) return null;
+
+  const amountCols = [];
+  for (let c = itemCol + 1; c < width && amountCols.length < 2; c++) {
+    if (dataRows.some((r) => isAmountLike(r[c]))) amountCols.push(c);
+  }
+  if (amountCols.length === 0) return null;
+
+  return {
+    headerRow: -1,
+    trialBalance: true,
+    cols: {
+      company: null, period: null, section: null,
+      item: itemCol, code: 0, side: null,
+      prev: amountCols.length >= 2 ? amountCols[0] : null,
+      curr: amountCols.length >= 2 ? amountCols[1] : amountCols[0],
+    },
+  };
+}
+
+/** 0始まりの列番号を "A"・"F" などの列名にする(読み取り方の表示用) */
+function colLetter(c) {
+  let s = "";
+  for (let n = c + 1; n > 0; n = Math.floor((n - 1) / 26)) {
+    s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+  }
+  return s;
+}
+
+/** どの列をどう読んだかの説明文(読み込み内訳・エラー表示用) */
+function describeLayout(layout) {
+  if (!layout) return "";
+  const { cols } = layout;
+  const part = (label, c) => (c === null || c === undefined ? null : `${label}=${colLetter(c)}列`);
+  const parts = [
+    part("科目コード", cols.code), part("科目名", cols.item), part("貸借", cols.side),
+    part("前期末", cols.prev), part("当期末", cols.curr),
+  ].filter(Boolean);
+  const kind = layout.trialBalance
+    ? "残高試算表形式"
+    : layout.headerRow >= 0 ? `見出し行あり(${layout.headerRow + 1}行目)` : "列を推定";
+  return `${kind}(${parts.join(" / ")})`;
+}
+
 /** 試算表形式の上部(データ開始前)から、会社名と期間を拾う */
 function trialBalancePreamble(rows) {
   const out = { company: null, period: null };
   const isCodeCell = (v) => /^\d{3,10}(\.0+)?$/.test(String(v == null ? "" : v).normalize("NFKC").trim());
-  const isSideCell = (v) => /^(借方?|貸方?)$/.test(String(v == null ? "" : v).normalize("NFKC").trim());
+  const isSideCell = (v) => TB_SIDE_RE.test(String(v == null ? "" : v).normalize("NFKC").trim());
   for (let r = 0; r < Math.min(rows.length, 12); r++) {
-    // コード + 貸借 がそろった行が来たら、データ開始とみなして終了
-    if (rows[r].some(isCodeCell) && rows[r].some(isSideCell)) break;
+    // コード + 貸借(または金額)がそろった行が来たら、データ開始とみなして終了
+    if (rows[r].some(isCodeCell) && (rows[r].some(isSideCell) || rows[r].some((v) => isAmountLike(v)))) break;
     const joined = rows[r]
       .map((c) => String(c == null ? "" : c).normalize("NFKC").trim())
       .filter(Boolean).join(" ");
@@ -439,7 +518,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
         const cell = (row[c] || "").trim();
         if (cell === "") continue;
         const n = cell.normalize("NFKC");
-        if (/^\d{3,10}(\.0+)?$/.test(n) || /^(借方?|貸方?)$/.test(n) || isAmountLike(cell)) continue;
+        if (/^\d{3,10}(\.0+)?$/.test(n) || TB_SIDE_RE.test(n) || isAmountLike(cell)) continue;
         rawName = cell;
         break;
       }
@@ -559,6 +638,8 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     } else {
       errors.push("認識できる科目が1件もありませんでした。テンプレートCSVの科目名をご確認ください。");
     }
+    // 原因を特定しやすいよう、どの列をどう読もうとしたかを添える
+    warnings.push(`読み取り方: ${describeLayout(layout)}`);
   }
   if (unmatched.length > 0) {
     warnings.push(
@@ -572,6 +653,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     datasets: [...datasets.values()],
     ok: errors.length === 0, errors, warnings, matched, recognized, unmatched,
     resolved: [...resolved.values()],
+    layoutInfo: describeLayout(layout),
   };
 }
 
