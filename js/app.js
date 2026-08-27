@@ -46,6 +46,7 @@ const state = {
   mappingText: "",        // 科目マッピングCSVの原文(保存・共有用)
   mapping: null,          // parseMappingCSV の結果(entries)
   unmatchedNames: [],     // 読み込みで認識できなかった科目(マッピング編集の候補)
+  resolvedNames: [],      // 読み込みで各科目をどう解釈したかの記録(読み込み内訳)
   interestPolicy: INTEREST_POLICY_DEFAULT,
 };
 
@@ -2049,6 +2050,8 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   let matched = 0;
   // 認識できなかった科目を集める(マッピングの画面編集に候補として出すため)
   const unmatchedNames = new Map(); // mappingKey → 元の表記
+  // 科目ごとの解釈の記録(読み込み内訳の表示用)
+  const resolvedNames = new Map();
 
   for (const src of sources) {
     const result = parseFinancialCSV(src.text, baseName(src.name), state.mapping);
@@ -2059,6 +2062,10 @@ function applySources(sources, { keepModalOpen = false } = {}) {
     for (const u of result.unmatched) {
       const k = mappingKey(u.name);
       if (!unmatchedNames.has(k)) unmatchedNames.set(k, u.name);
+    }
+    for (const r of result.resolved || []) {
+      const k = mappingKey(r.name);
+      if (!resolvedNames.has(k)) resolvedNames.set(k, r);
     }
 
     for (const ds of result.datasets) {
@@ -2079,6 +2086,8 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   }
 
   state.unmatchedNames = [...unmatchedNames.values()];
+  state.resolvedNames = [...resolvedNames.values()];
+  renderResolveReport();
 
   const label = sources.length === 1 ? sources[0].name : `${sources.length}個のファイル`;
   const status = document.getElementById("file-status");
@@ -2157,6 +2166,9 @@ function clearAll() {
   state.datasets = [];
   state.sources = [];
   state.overrides = {};
+  state.unmatchedNames = [];
+  state.resolvedNames = [];
+  renderResolveReport();
   document.getElementById("file-input").value = "";
   document.getElementById("file-status").hidden = true;
   const messages = document.getElementById("messages");
@@ -2234,6 +2246,52 @@ async function handleMappingFile(fileList) {
     mappingStatus(`読み込めませんでした: ${err.message}`, "ng");
   }
   document.getElementById("mapping-file-input").value = "";
+}
+
+/* ---- 読み込み内訳(各科目をどの項目として読んだかの一覧) ---- */
+
+const RESOLVE_VIA = {
+  label: { text: "組み込み(正式名)", cls: "via-exact" },
+  alias: { text: "組み込み(別名)", cls: "via-exact" },
+  loose: { text: "表記ゆれを吸収", cls: "via-loose" },
+  mapping: { text: "マッピング", cls: "via-mapping" },
+  none: { text: "認識できず", cls: "via-none" },
+};
+
+function renderResolveReport() {
+  const box = document.getElementById("resolve-report");
+  const body = document.getElementById("resolve-body");
+  if (!box || !body) return;
+  const items = state.resolvedNames || [];
+  const un = state.unmatchedNames || [];
+  if (items.length === 0 && un.length === 0) { box.hidden = true; return; }
+  box.hidden = false;
+  document.getElementById("resolve-summary").textContent =
+    `科目の読み込み内訳を確認(${items.length + un.length}科目` +
+    (un.length ? ` / うち認識できず ${un.length}件` : "") + ")";
+
+  const fieldLabel = (t) => {
+    const f = SCHEMA[t.section].find((g) => g.key === t.key && !g.aliasOnly);
+    return `${SECTION_LABELS[t.section]} ${f ? f.label : t.key}`;
+  };
+  body.innerHTML = "";
+  const addRow = (name, targetText, sign, via, dim) => {
+    const v = RESOLVE_VIA[via] || RESOLVE_VIA.label;
+    body.appendChild(el("tr", { class: via === "none" ? "rv-unmatched" : "" },
+      el("td", { class: `rv-name${dim ? " rv-dim" : ""}`, text: name }),
+      el("td", { text: targetText }),
+      el("td", { class: "rv-sign", text: sign }),
+      el("td", {}, el("span", { class: `via-badge ${v.cls}`, text: v.text }))));
+  };
+  // 確認してほしい順に並べる: 認識できず → 表記ゆれ → マッピング → 組み込み
+  for (const nm of un) addRow(nm, "—(読み飛ばしました)", "", "none");
+  const order = { loose: 0, mapping: 1, label: 2, alias: 2 };
+  const sorted = [...items].sort((a, b) => (order[a.via] ?? 2) - (order[b.via] ?? 2));
+  for (const it of sorted) {
+    it.targets.forEach((t, i) => {
+      addRow(i === 0 ? it.name : "〃", fieldLabel(t), t.sign < 0 ? "−" : "+", it.via, i > 0);
+    });
+  }
 }
 
 /* ---- マッピングの画面編集(書き間違い防止のプルダウン形式) ---- */

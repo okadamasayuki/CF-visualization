@@ -44,7 +44,10 @@ const ITEM_LOOSE = new Map();
       const names = [f.label, ...(f.aliases || [])];
       for (const name of names) {
         const exact = normalizeKey(name);
-        if (exact && !ITEM_EXACT.has(exact)) ITEM_EXACT.set(exact, target);
+        if (exact && !ITEM_EXACT.has(exact)) {
+          // matchKind は読み込み内訳の表示用(正式名か・別名か・ゆるい一致か)
+          ITEM_EXACT.set(exact, { ...target, matchKind: name === f.label ? "label" : "alias" });
+        }
 
         const loose = looseKey(name);
         if (!loose) continue;
@@ -56,7 +59,7 @@ const ITEM_LOOSE = new Map();
     }
   }
   for (const [loose, target] of looseSeen) {
-    if (target && !ITEM_EXACT.has(loose)) ITEM_LOOSE.set(loose, target);
+    if (target && !ITEM_EXACT.has(loose)) ITEM_LOOSE.set(loose, { ...target, matchKind: "loose" });
   }
 })();
 
@@ -286,6 +289,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
   // 同じ科目に複数行あれば合算する(例:受取手形 + 売掛金 → 営業債権)
   const seen = new Map();
   const unmatched = [];
+  const resolved = new Map(); // 科目ごとの「どう解釈したか」の記録(読み込み内訳用)
   let matched = 0;    // 金額まで取り込めた科目の行数
   let recognized = 0; // 科目名を認識できた行数(金額が空の行も含む)
 
@@ -331,6 +335,11 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     const mapped = mappingLookup(mapping, rawCode) || mappingLookup(mapping, rawItem);
     if (mapped) {
       recognized++;
+      const rkey = mappingKey(rawName);
+      if (!resolved.has(rkey)) {
+        resolved.set(rkey, { name: rawName, via: "mapping",
+          targets: mapped.map((t) => ({ section: t.section, key: t.key, sign: t.sign })) });
+      }
       let usedM = false;
       for (const t of mapped) {
         const putM = (which, raw) => {
@@ -370,6 +379,11 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
       continue;
     }
     recognized++;
+    const rkey = mappingKey(rawName);
+    if (!resolved.has(rkey)) {
+      resolved.set(rkey, { name: rawName, via: target.matchKind || "label",
+        targets: [{ section: target.section, key: target.key, sign: target.negate ? -1 : 1 }] });
+    }
 
     const put = (which, raw) => {
       let v = parseAmount(raw);
@@ -421,6 +435,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
   return {
     datasets: [...datasets.values()],
     ok: errors.length === 0, errors, warnings, matched, recognized, unmatched,
+    resolved: [...resolved.values()],
   };
 }
 
