@@ -2099,6 +2099,10 @@ function applySources(sources, { keepModalOpen = false } = {}) {
     if (errors.length === 0) errors.push("読み込めるデータがありませんでした。");
     renderMessages(errors, warnings);
     if (state.unmatchedNames.length) {
+      // 全科目が社内独自名で取り込めなかったケース。ファイルは保持しておき、
+      // マッピングを適用したら再読み込みなしでこのファイルを再解釈できるようにする
+      state.sources = sources;
+      saveState();
       mappingStatus(`認識できなかった${state.unmatchedNames.length}件の科目を「マッピングを画面で編集」に入れました。反映先を選んで適用してください。`, "");
     }
     state.datasets = [];

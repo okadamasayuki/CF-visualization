@@ -377,7 +377,8 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     const rawName = rawItem || rawCode;
     if (rawName === "") continue;
     // 試算表形式では、科目コードのない行(表題・小計・ページ見出しなど)はデータではない
-    if (layout.trialBalance && !/^\d{3,10}$/.test(rawCode.normalize("NFKC"))) continue;
+    // (Excelの書式で "1234567.0" になっていてもコードとして扱う)
+    if (layout.trialBalance && !/^\d{3,10}(\.0+)?$/.test(rawCode.normalize("NFKC"))) continue;
 
     // 会社名・四半期が空のセルは直前の行から引き継ぐ(先頭行にだけ書く表に対応)
     if (cols.company !== null) {
@@ -484,9 +485,15 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
   }
 
   if (matched === 0) {
-    errors.push(recognized > 0
-      ? `科目は${recognized}件認識できましたが、金額が1件も入力されていません。金額の列をご確認ください。`
-      : "認識できる科目が1件もありませんでした。テンプレートCSVの科目名をご確認ください。");
+    if (recognized > 0) {
+      errors.push(`科目は${recognized}件認識できましたが、金額が1件も入力されていません。金額の列をご確認ください。`);
+    } else if (unmatched.length > 0) {
+      // 社内独自の科目体系で、1件も自動認識できなかったケース。マッピングで解決できる
+      errors.push(`${unmatched.length}件の科目が見つかりましたが、いずれも組み込みの対応にない社内科目のため、自動では取り込めませんでした。` +
+        "下の「マッピングを画面で編集」に全科目を候補として入れてあるので、反映先を選んで適用すると読み込めます(ファイルの再読み込みは不要です)。");
+    } else {
+      errors.push("認識できる科目が1件もありませんでした。テンプレートCSVの科目名をご確認ください。");
+    }
   }
   if (unmatched.length > 0) {
     warnings.push(
