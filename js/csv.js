@@ -236,26 +236,78 @@ function findHeader(rows) {
  * 「数字のコード + 貸借」の行が複数あればこの形式とみなす。
  */
 function inferTrialBalanceLayout(rows) {
-  let hits = 0;
+  const norm = (v) => String(v == null ? "" : v).normalize("NFKC").trim();
+  const isCode = (v) => /^\d{3,10}(\.0+)?$/.test(norm(v));
+  const isSide = (v) => /^(借方?|貸方?)$/.test(norm(v));
+
+  // 各行で「最初のコード列」と「貸借列」を探し、多数決で列位置を決める
+  // (会計システムによって間に空列や補助科目列が挟まることがあるため、位置は決め打ちしない)
+  const votes = new Map(); // "codeCol:sideCol" → その組み合わせの行
   for (const row of rows) {
-    const code = String(row[0] == null ? "" : row[0]).normalize("NFKC").trim();
-    const side = String(row[2] == null ? "" : row[2]).normalize("NFKC").trim();
-    if (/^\d{3,10}$/.test(code) && /^(借方?|貸方?)$/.test(side)) hits++;
+    let codeCol = -1;
+    let sideCol = -1;
+    for (let c = 0; c < row.length; c++) {
+      if (codeCol < 0 && isCode(row[c])) codeCol = c;
+      if (codeCol >= 0 && sideCol < 0 && c > codeCol && isSide(row[c])) sideCol = c;
+    }
+    if (codeCol >= 0 && sideCol > codeCol) {
+      const key = `${codeCol}:${sideCol}`;
+      if (!votes.has(key)) votes.set(key, []);
+      votes.get(key).push(row);
+    }
   }
-  if (hits < 3) return null;
+  let best = null;
+  for (const [key, list] of votes) {
+    if (!best || list.length > votes.get(best).length) best = key;
+  }
+  if (!best || votes.get(best).length < 3) return null;
+  const [codeCol, sideCol] = best.split(":").map(Number);
+  const dataRows = votes.get(best);
+
+  // 科目名: コード列と貸借列の間で、数字ではない文字が最も多く入っている列。
+  // 無ければコード列より左も探す(名称→コードの順のレイアウト対応)
+  let itemCol = null;
+  let bestNames = 0;
+  const nameScore = (c) => dataRows.filter((r) => norm(r[c]) !== "" && !isCode(r[c])).length;
+  for (let c = codeCol + 1; c < sideCol; c++) {
+    const n = nameScore(c);
+    if (n > bestNames) { bestNames = n; itemCol = c; }
+  }
+  if (itemCol === null) {
+    for (let c = 0; c < codeCol; c++) {
+      const n = nameScore(c);
+      if (n > bestNames) { bestNames = n; itemCol = c; }
+    }
+  }
+
+  // 金額: 貸借列より後で、データ行に金額が入っている最初の2列(前期末・当期末)
+  const width = Math.max(...dataRows.map((r) => r.length));
+  const amountCols = [];
+  for (let c = sideCol + 1; c < width && amountCols.length < 2; c++) {
+    if (dataRows.some((r) => isAmountLike(r[c]))) amountCols.push(c);
+  }
+  if (amountCols.length === 0) return null;
+
   return {
     headerRow: -1,
     trialBalance: true,
-    cols: { company: null, period: null, section: null, item: 1, code: 0, prev: 3, curr: 4 },
+    cols: {
+      company: null, period: null, section: null,
+      item: itemCol, code: codeCol,
+      prev: amountCols.length >= 2 ? amountCols[0] : null,
+      curr: amountCols.length >= 2 ? amountCols[1] : amountCols[0],
+    },
   };
 }
 
 /** 試算表形式の上部(データ開始前)から、会社名と期間を拾う */
 function trialBalancePreamble(rows) {
   const out = { company: null, period: null };
+  const isCodeCell = (v) => /^\d{3,10}(\.0+)?$/.test(String(v == null ? "" : v).normalize("NFKC").trim());
+  const isSideCell = (v) => /^(借方?|貸方?)$/.test(String(v == null ? "" : v).normalize("NFKC").trim());
   for (let r = 0; r < Math.min(rows.length, 12); r++) {
-    const first = String(rows[r][0] == null ? "" : rows[r][0]).normalize("NFKC").trim();
-    if (/^\d{3,10}$/.test(first)) break; // データが始まったら終了
+    // コード + 貸借 がそろった行が来たら、データ開始とみなして終了
+    if (rows[r].some(isCodeCell) && rows[r].some(isSideCell)) break;
     const joined = rows[r]
       .map((c) => String(c == null ? "" : c).normalize("NFKC").trim())
       .filter(Boolean).join(" ");
