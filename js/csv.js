@@ -227,6 +227,60 @@ function findHeader(rows) {
   return null;
 }
 
+/**
+ * 会計システムの残高試算表形式を推定する。
+ *   A: 科目コード(数字) / B: 科目名 / C: 貸借(借方・貸方) /
+ *   D: 前期末残高 / E: 当四半期末残高 / F: 摘要
+ * 見出し行はなく、上部に「会社名(コード)」「YYYY/MM …(YYYYMM)」の行があり、
+ * データは途中に小計行や空白を挟んでブロック状に並ぶ。
+ * 「数字のコード + 貸借」の行が複数あればこの形式とみなす。
+ */
+function inferTrialBalanceLayout(rows) {
+  let hits = 0;
+  for (const row of rows) {
+    const code = String(row[0] == null ? "" : row[0]).normalize("NFKC").trim();
+    const side = String(row[2] == null ? "" : row[2]).normalize("NFKC").trim();
+    if (/^\d{3,10}$/.test(code) && /^(借方?|貸方?)$/.test(side)) hits++;
+  }
+  if (hits < 3) return null;
+  return {
+    headerRow: -1,
+    trialBalance: true,
+    cols: { company: null, period: null, section: null, item: 1, code: 0, prev: 3, curr: 4 },
+  };
+}
+
+/** 試算表形式の上部(データ開始前)から、会社名と期間を拾う */
+function trialBalancePreamble(rows) {
+  const out = { company: null, period: null };
+  for (let r = 0; r < Math.min(rows.length, 12); r++) {
+    const first = String(rows[r][0] == null ? "" : rows[r][0]).normalize("NFKC").trim();
+    if (/^\d{3,10}$/.test(first)) break; // データが始まったら終了
+    const joined = rows[r]
+      .map((c) => String(c == null ? "" : c).normalize("NFKC").trim())
+      .filter(Boolean).join(" ");
+    if (joined === "") continue;
+
+    // 期間: 「2026/03 …(202603)」のような行。括弧のYYYYMM、なければ YYYY/MM
+    if (!out.period) {
+      const m = joined.match(/[((]\s*(\d{4})(\d{2})\s*[))]/) ||
+        joined.match(/(\d{4})\s*[/年.-]\s*(\d{1,2})(?:月|\b)/);
+      if (m && +m[2] >= 1 && +m[2] <= 12) {
+        const p = parsePeriod(`${m[1]}-${m[2]}`);
+        if (p && p.year !== null) out.period = { ...p, label: `${m[1]}/${String(+m[2]).padStart(2, "0")}` };
+      }
+    }
+    // 会社名: 「◯◯株式会社(12345)」のような行(期間・単位などの行は除く)
+    if (!out.company) {
+      const m = joined.match(/^(.+?)\s*[((]\s*\d{3,6}\s*[))]/);
+      if (m && !/データ|単位|試算表|残高|期間|年度|月次|四半期/.test(m[1])) {
+        out.company = m[1].trim();
+      }
+    }
+  }
+  return out;
+}
+
 /** 見出し行がない場合に、科目名(またはマッピング済みのコード)が並ぶ列と金額列を推定する */
 function inferLayout(rows, mapping = null) {
   const width = Math.max(...rows.map((r) => r.length));
@@ -276,9 +330,17 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
   const rows = parseDelimited(text, detectDelimiter(text));
   if (rows.length === 0) return fail("ファイルが空です。");
 
-  const layout = findHeader(rows) || inferLayout(rows, mapping);
+  const layout = findHeader(rows) || inferTrialBalanceLayout(rows) || inferLayout(rows, mapping);
   if (!layout) {
     return fail("科目名の列を判別できませんでした。1行目に「会社名,区分,科目,前期末,当期末」の見出しを入れてください(テンプレートCSVをご利用ください)。");
+  }
+  // 試算表形式なら、上部の「会社名(コード)」「YYYY/MM(YYYYMM)」の行から会社と期間を拾う
+  let tbCompany = null;
+  let tbPeriod = null;
+  if (layout.trialBalance) {
+    const pre = trialBalancePreamble(rows);
+    tbCompany = pre.company;
+    tbPeriod = pre.period;
   }
   const { cols } = layout;
   if (cols.curr === null && cols.prev !== null) { cols.curr = cols.prev; cols.prev = null; }
@@ -314,6 +376,8 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     const rawCode = cols.code !== null && cols.code !== cols.item ? (row[cols.code] || "").trim() : "";
     const rawName = rawItem || rawCode;
     if (rawName === "") continue;
+    // 試算表形式では、科目コードのない行(表題・小計・ページ見出しなど)はデータではない
+    if (layout.trialBalance && !/^\d{3,10}$/.test(rawCode.normalize("NFKC"))) continue;
 
     // 会社名・四半期が空のセルは直前の行から引き継ぐ(先頭行にだけ書く表に対応)
     if (cols.company !== null) {
@@ -324,8 +388,8 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
       const p = parsePeriod(row[cols.period]);
       if (p) lastPeriod = p;
     }
-    const companyName = cols.company !== null ? (lastCompany || defaultCompany) : defaultCompany;
-    const period = (cols.period !== null && lastPeriod) ? lastPeriod : NO_PERIOD;
+    const companyName = cols.company !== null ? (lastCompany || defaultCompany) : (tbCompany || defaultCompany);
+    const period = (cols.period !== null && lastPeriod) ? lastPeriod : (tbPeriod || NO_PERIOD);
     const dataset = datasetFor(companyName, period);
     const data = dataset.data;
 

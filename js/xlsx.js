@@ -29,7 +29,20 @@ function xlsxZipEntries(buf) {
   for (let i = buf.byteLength - 22; i >= stop; i--) {
     if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
   }
-  if (eocd < 0) throw new Error("Excelファイル(ZIP形式)として読めません");
+  if (eocd < 0) {
+    // 拡張子は .xlsx でも、中身が別形式のことがある(会計システムの出力に多い)
+    if (bytes[0] === 0xd0 && bytes[1] === 0xcf) {
+      throw new Error("中身が旧形式(Excel 97-2003)です。Excelで開いて「.xlsx」として保存し直してください");
+    }
+    const head = new TextDecoder().decode(bytes.subarray(0, 200)).trimStart().toLowerCase();
+    if (head.startsWith("<?xml") || head.startsWith("<workbook")) {
+      throw new Error("中身がXML形式(XMLスプレッドシート)です。Excelで開いて「.xlsx」として保存し直してください");
+    }
+    if (head.startsWith("<html") || head.startsWith("<!doctype")) {
+      throw new Error("中身がHTML形式です。Excelで開いて「.xlsx」として保存し直してください");
+    }
+    throw new Error("Excelファイルとして読めません。Excelで開いて「.xlsx」として保存し直してください");
+  }
   const count = view.getUint16(eocd + 10, true);
   let off = view.getUint32(eocd + 16, true);
   const entries = new Map();
