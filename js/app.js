@@ -45,6 +45,7 @@ const state = {
   overrides: {},          // 画面で手入力した詳細情報(ファイルに残らないので別途保存)
   mappingText: "",        // 科目マッピングCSVの原文(保存・共有用)
   mapping: null,          // parseMappingCSV の結果(entries)
+  unmatchedNames: [],     // 読み込みで認識できなかった科目(マッピング編集の候補)
   interestPolicy: INTEREST_POLICY_DEFAULT,
 };
 
@@ -2046,6 +2047,8 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   const errors = [], warnings = [];
   const merged = new Map();
   let matched = 0;
+  // 認識できなかった科目を集める(マッピングの画面編集に候補として出すため)
+  const unmatchedNames = new Map(); // mappingKey → 元の表記
 
   for (const src of sources) {
     const result = parseFinancialCSV(src.text, baseName(src.name), state.mapping);
@@ -2053,6 +2056,10 @@ function applySources(sources, { keepModalOpen = false } = {}) {
     errors.push(...result.errors.map((e) => prefix + e));
     warnings.push(...result.warnings.map((w) => prefix + w));
     matched += result.matched;
+    for (const u of result.unmatched) {
+      const k = mappingKey(u.name);
+      if (!unmatchedNames.has(k)) unmatchedNames.set(k, u.name);
+    }
 
     for (const ds of result.datasets) {
       const key = keyOf(ds.company, ds.period.label);
@@ -2071,6 +2078,8 @@ function applySources(sources, { keepModalOpen = false } = {}) {
     }
   }
 
+  state.unmatchedNames = [...unmatchedNames.values()];
+
   const label = sources.length === 1 ? sources[0].name : `${sources.length}個のファイル`;
   const status = document.getElementById("file-status");
   status.hidden = false;
@@ -2080,6 +2089,9 @@ function applySources(sources, { keepModalOpen = false } = {}) {
     status.className = "file-status ng";
     if (errors.length === 0) errors.push("読み込めるデータがありませんでした。");
     renderMessages(errors, warnings);
+    if (state.unmatchedNames.length) {
+      mappingStatus(`認識できなかった${state.unmatchedNames.length}件の科目を「マッピングを画面で編集」に入れました。反映先を選んで適用してください。`, "");
+    }
     state.datasets = [];
     showEmptyState();
     document.getElementById("btn-clear").hidden = false;
@@ -2094,6 +2106,9 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   status.textContent = `${label} を読み込みました(${state.companies.length}社${periodText} / ${matched}件の科目を認識)`;
   status.className = "file-status ok";
   renderMessages(errors, warnings);
+  if (state.unmatchedNames.length) {
+    mappingStatus(`認識できなかった${state.unmatchedNames.length}件の科目を「マッピングを画面で編集」に入れました。反映先を選んで適用してください。`, "");
+  }
   renderSelectors();
   renderAll();
   if (!keepModalOpen) closeSourceModal();
@@ -2235,11 +2250,13 @@ function addMappingEditorRow(vals) {
   del.addEventListener("click", () => row.remove());
 
   row.append(name, sec, target, sign, del);
+  // 読み込んだデータから拾った候補の行。反映先が未選択のままなら適用時に読み飛ばす
+  if (v.suggested) { row.classList.add("map-suggested"); row.dataset.suggested = "1"; }
   rows.appendChild(row);
   return row;
 }
 
-/** いまのマッピングを行として並べる(なければ空の1行) */
+/** いまのマッピング + 読み込みで認識できなかった科目を行として並べる */
 function openMappingEditor() {
   const rows = document.getElementById("mapping-editor-rows");
   rows.innerHTML = "";
@@ -2251,6 +2268,19 @@ function openMappingEditor() {
       }
     }
   }
+  // 読み込んだデータで認識できなかった科目を、名前入り・反映先未選択の行として追加する
+  let suggested = 0;
+  for (const nm of state.unmatchedNames) {
+    if (mappingLookup(state.mapping, nm)) continue; // すでにマッピング済み
+    addMappingEditorRow({ name: nm, section: "bs", target: "", sign: 1, suggested: true });
+    suggested++;
+  }
+  const note = document.getElementById("mapping-editor-note");
+  note.hidden = suggested === 0;
+  if (suggested > 0) {
+    note.textContent = `色付きの${suggested}行は、読み込んだデータで認識できなかった科目です。` +
+      "反映先を選んで適用してください(反映先が未選択のままの行は適用されず、不要なら×で削除できます)。";
+  }
   if (!rows.children.length) addMappingEditorRow();
   document.getElementById("mapping-editor").hidden = false;
 }
@@ -2260,25 +2290,37 @@ function applyMappingEditor() {
   const q = (s) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
   const lines = ["科目,反映先の区分,反映先の科目,符号"];
   const problems = [];
+  let skipped = 0;
   document.querySelectorAll("#mapping-editor-rows .map-row").forEach((row, i) => {
     const name = row.querySelector(".map-name").value.trim();
     const target = row.querySelector(".map-target").value;
     if (name === "" && target === "") return; // 何も入れていない行は無視
     if (name === "") { problems.push(`${i + 1}行目: 科目名が空です。`); return; }
-    if (target === "") { problems.push(`${i + 1}行目「${name}」: 反映先の科目を選んでください。`); return; }
+    if (target === "") {
+      // データから拾った候補の行は、反映先を選んでいなければ「まだ決めていない」として読み飛ばす
+      if (row.dataset.suggested) { skipped++; return; }
+      problems.push(`${i + 1}行目「${name}」: 反映先の科目を選んでください。`);
+      return;
+    }
     const section = row.querySelector(".map-section").value;
     const sign = row.querySelector(".map-sign").value;
     lines.push(`${q(name)},${SECTION_LABELS[section]},${q(target)},${sign}`);
   });
   if (problems.length) { mappingStatus(`適用できません: ${problems.join(" ")}`, "ng"); return; }
-  if (lines.length === 1) { mappingStatus("行がありません。科目を1行以上入力してください。", "ng"); return; }
+  if (lines.length === 1) {
+    mappingStatus(skipped > 0
+      ? "反映先が選ばれた行がありません。候補の行の反映先を選んでから適用してください。"
+      : "行がありません。科目を1行以上入力してください。", "ng");
+    return;
+  }
   if (!setMapping(lines.join("\r\n") + "\r\n")) return;
   const n = state.mapping.entries.size;
+  const skipNote = skipped > 0 ? `(反映先が未選択の${skipped}行は適用していません)` : "";
   if (state.sources.length) {
     applySources(state.sources, { keepModalOpen: true });
-    mappingStatus(`${n}科目のマッピングを適用し、読み込み済みのデータを再計算しました。`, "ok");
+    mappingStatus(`${n}科目のマッピングを適用し、読み込み済みのデータを再計算しました。${skipNote}`, "ok");
   } else {
-    mappingStatus(`${n}科目のマッピングを適用しました。次にCSVを読み込むと適用されます。`, "ok");
+    mappingStatus(`${n}科目のマッピングを適用しました。次にCSVを読み込むと適用されます。${skipNote}`, "ok");
   }
   saveState();
 }

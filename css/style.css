@@ -763,6 +763,8 @@ tr.has-note { cursor: help; }
   font: inherit;
 }
 .map-del:hover { color: #c0392b; border-color: #c0392b; }
+.map-row.map-suggested .map-name { background: var(--accent-wash); border-color: var(--accent); }
+.map-note { color: var(--accent); }
 @media (max-width: 640px) {
   .map-head { display: none; }
   .map-row { grid-template-columns: 1fr 1fr 30px; }
