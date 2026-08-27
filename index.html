@@ -286,6 +286,7 @@
       <div class="toolbar">
         <button id="btn-sample-27" type="button" class="btn btn-secondary">サンプル(270ファイル / 27社×10四半期)</button>
         <button id="btn-sample" type="button" class="btn">サンプル(1社)</button>
+        <button id="btn-sample-xlsx" type="button" class="btn">試算表サンプルExcelをダウンロード</button>
         <button id="btn-template" type="button" class="btn">テンプレートCSVをダウンロード</button>
         <button id="btn-export" type="button" class="btn" hidden>読み込んだ内容をCSVで保存</button>
         <button id="btn-clear" type="button" class="btn btn-ghost" hidden>クリア</button>
@@ -310,8 +311,23 @@
       </details>
 
       <details class="format-help">
-        <summary>CSVの書式について</summary>
-        <p>1行目に見出し、2行目以降に科目と金額を並べた縦持ち形式です。<code>会社名</code>と<code>四半期</code>の列を入れると、複数社・複数四半期を1ファイルにまとめられます(どちらも任意)。実際のデータは「データ」タブで表形式のまま確認できます。</p>
+        <summary>ファイルの書式について(残高試算表形式・テンプレート形式)</summary>
+        <p><strong>会計システムが出力する残高試算表形式は、そのまま読み込めます(見出し行は不要)。</strong>
+          列は「科目コード/科目名/貸借/前期末残高/当期末残高/摘要」で、上部の
+          「会社名(コード)」「YYYY/MM …(YYYYMM)」の行から会社名と期間を読み取ります。
+          サンプルボタンのデータや「試算表サンプルExcel」もこの構成です。</p>
+<pre><code>残高試算表
+(単位:円) 2026/03 四半期データ(202603)
+サンプル製作所(10001)
+1110001,現金及び預金,借方,18500,15100,
+1130001,売掛金,借方,18000,21000,
+,資産合計,,86500,91600,</code></pre>
+        <ul>
+          <li>列の位置が多少違っても、実際の行の並びから自動で推定します。</li>
+          <li>科目コードのない行(表題・小計・ページ見出し)は読み飛ばします。データが途中の空白行でブロック状に分かれていても問題ありません。</li>
+          <li>Excel(.xlsx)のままでも読み込めます。PLなどの科目は当四半期末の列だけを使います(前期の累計列は無視)。</li>
+        </ul>
+        <p>次の<strong>テンプレート形式</strong>(1行目に見出し)も使えます。<code>会社名</code>と<code>四半期</code>の列を入れると、複数社・複数四半期を1ファイルにまとめられます(どちらも任意)。実際のデータは「データ」タブで表形式のまま確認できます。</p>
 <pre><code>会社名,四半期,区分,科目,前期末,当期末
 アルファ工業,2025Q1,BS,現金及び預金,11700,15900
 アルファ工業,2025Q1,BS,預け金,4000,4600
@@ -470,6 +486,7 @@
 <script src="js/derivation.js?v=__BUILD__"></script>
 <script src="js/share.js?v=__BUILD__"></script>
 <script src="js/samples.js?v=__BUILD__"></script>
+<script src="js/tb.js?v=__BUILD__"></script>
 <script src="js/app.js?v=__BUILD__"></script>
 </body>
 </html>

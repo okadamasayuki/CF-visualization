@@ -134,15 +134,18 @@ function shortPeriod(period) {
   return period.q ? `${String(period.year).slice(-2)}Q${period.q}` : period.label;
 }
 
-function downloadText(filename, text) {
-  // ExcelでそのままUTF-8として開けるようBOMを付ける
-  const blob = new Blob(["﻿" + text], { type: "text/csv;charset=utf-8" });
+function downloadBlob(filename, blob) {
   const url = URL.createObjectURL(blob);
   const a = el("a", { href: url, download: filename });
   document.body.append(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function downloadText(filename, text) {
+  // ExcelでそのままUTF-8として開けるようBOMを付ける
+  downloadBlob(filename, new Blob(["﻿" + text], { type: "text/csv;charset=utf-8" }));
 }
 
 const keyOf = (company, periodLabel) => `${company}\u0000${periodLabel}`;
@@ -1935,40 +1938,6 @@ function baseName(filename) {
   return filename.replace(/\.[^.]+$/, "") || filename;
 }
 
-/**
- * 1本のCSVを「会社 × 四半期」ごとのファイルに分割する。
- * 実運用で1明細1ファイルを投入するケースを、サンプルでそのまま再現するため。
- */
-function splitByCompanyPeriod(text) {
-  const rows = parseDelimited(text, detectDelimiter(text));
-  const layout = findHeader(rows);
-  if (!layout || layout.cols.company === null || layout.cols.period === null) {
-    return [{ name: "sample-27.csv", text }];
-  }
-  const { company: ci, period: pi } = layout.cols;
-  const q = (v) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  const line = (cells) => cells.map((c) => q(String(c == null ? "" : c))).join(",");
-  const header = line(rows[layout.headerRow]);
-
-  const groups = new Map();
-  let company = "", period = "";
-  for (let r = layout.headerRow + 1; r < rows.length; r++) {
-    const c = (rows[r][ci] || "").trim();
-    const p = (rows[r][pi] || "").trim();
-    if (c !== "") company = c;
-    if (p !== "") period = p;
-    const key = `${company}_${period}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(line(rows[r]));
-  }
-  // ファイル名に使えない文字は置き換える
-  const safe = (s) => s.replace(/[\\/:*?"<>|]/g, "_");
-  return [...groups].map(([key, lines]) => ({
-    name: `${safe(key)}.csv`,
-    text: [header, ...lines].join("\r\n") + "\r\n",
-  }));
-}
-
 /** 会社×四半期のデータセットを組み立て、CF・チェック・指標を計算する */
 function buildState(datasets, warnings) {
   state.datasets = datasets;
@@ -2825,10 +2794,18 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // サンプルは、社内の会計システムと同じ残高試算表形式に変換して読み込む
   document.getElementById("btn-sample-27")
-    .addEventListener("click", () => applySources(splitByCompanyPeriod(SAMPLE_27_CSV)));
+    .addEventListener("click", () => applySources(templateToTrialBalance(SAMPLE_27_CSV)));
   document.getElementById("btn-sample")
-    .addEventListener("click", () => applySources([{ name: "sample.csv", text: SAMPLE_CSV }]));
+    .addEventListener("click", () => applySources(
+      templateToTrialBalance(SAMPLE_CSV, { company: "サンプル製作所", year: 2026, month: 3 })));
+  document.getElementById("btn-sample-xlsx")
+    .addEventListener("click", () => {
+      const f = buildTrialBalanceSampleXlsx();
+      downloadBlob(f.name, new Blob([f.bytes],
+        { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    });
   document.getElementById("btn-template")
     .addEventListener("click", () => downloadText("cf-template.csv", buildTemplateCSV()));
   document.getElementById("btn-export")
