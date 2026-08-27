@@ -426,11 +426,24 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     // 科目名の列と科目コードの列は別でもよい。名前が空ならコードを表示名に使う
     const rawItem = cols.item !== null ? (row[cols.item] || "").trim() : "";
     const rawCode = cols.code !== null && cols.code !== cols.item ? (row[cols.code] || "").trim() : "";
-    const rawName = rawItem || rawCode;
+    let rawName = rawItem || rawCode;
     if (rawName === "") continue;
     // 試算表形式では、科目コードのない行(表題・小計・ページ見出しなど)はデータではない
     // (Excelの書式で "1234567.0" になっていてもコードとして扱う)
     if (layout.trialBalance && !/^\d{3,10}(\.0+)?$/.test(rawCode.normalize("NFKC"))) continue;
+    // 試算表形式で名前の列が推定と違っていた場合の保険:
+    // コード・貸借・金額のどれでもない最初の文字セルを科目名として使う
+    if (layout.trialBalance && rawItem === "") {
+      for (let c = 0; c < row.length; c++) {
+        if (c === cols.code || c === cols.prev || c === cols.curr) continue;
+        const cell = (row[c] || "").trim();
+        if (cell === "") continue;
+        const n = cell.normalize("NFKC");
+        if (/^\d{3,10}(\.0+)?$/.test(n) || /^(借方?|貸方?)$/.test(n) || isAmountLike(cell)) continue;
+        rawName = cell;
+        break;
+      }
+    }
 
     // 会社名・四半期が空のセルは直前の行から引き継ぐ(先頭行にだけ書く表に対応)
     if (cols.company !== null) {
@@ -449,7 +462,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     // 読み込んだ科目マッピングがあれば、組み込みの対応より優先する。
     // 科目コードの列があればコードで照合し、無ければ(または外れたら)科目名で照合する。
     // 1つの科目を複数の項目へ同時に反映できる(符号はマッピングの指定どおり)
-    const mapped = mappingLookup(mapping, rawCode) || mappingLookup(mapping, rawItem);
+    const mapped = mappingLookup(mapping, rawCode) || mappingLookup(mapping, rawName);
     if (mapped) {
       recognized++;
       const rkey = mappingKey(rawName);
