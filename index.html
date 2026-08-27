@@ -272,7 +272,7 @@
     </div>
     <section class="card">
       <label id="dropzone" class="dropzone" for="file-input">
-        <input type="file" id="file-input" accept=".csv,.tsv,.txt,text/csv" multiple hidden>
+        <input type="file" id="file-input" accept=".csv,.tsv,.txt,.xlsx,.xlsm,text/csv" multiple hidden>
         <span class="dz-icon" aria-hidden="true">
           <svg viewBox="0 0 48 48" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M24 32V10"></path><path d="M15 19l9-9 9 9"></path>
@@ -280,7 +280,7 @@
           </svg>
         </span>
         <span class="dz-title">CSVファイルをドラッグ&amp;ドロップ、またはクリックして選択</span>
-        <span class="dz-note">複数社・複数四半期を1ファイルにまとめてもOK / 複数ファイルの同時選択も可 / UTF-8・Shift_JIS 対応</span>
+        <span class="dz-note">CSV・Excel(.xlsx)対応 / 複数社・複数四半期を1ファイルにまとめてもOK / 複数ファイルの同時選択も可 / UTF-8・Shift_JIS 対応</span>
       </label>
 
       <div class="toolbar">
@@ -334,7 +334,7 @@
           <button id="btn-mapping-edit" type="button" class="btn">マッピングを画面で編集</button>
           <button id="btn-mapping-template" type="button" class="btn btn-secondary">現在の算定ロジックをCSVでダウンロード</button>
           <button id="btn-mapping-upload" type="button" class="btn btn-secondary">マッピングCSVを読み込む</button>
-          <input type="file" id="mapping-file-input" accept=".csv,.tsv,.txt,text/csv" hidden>
+          <input type="file" id="mapping-file-input" accept=".csv,.tsv,.txt,.xlsx,.xlsm,text/csv" hidden>
           <button id="btn-mapping-clear" type="button" class="btn btn-ghost" hidden>マッピングを解除</button>
         </div>
         <div id="mapping-editor" hidden>
@@ -450,6 +450,7 @@
 </footer>
 
 <script src="js/schema.js?v=__BUILD__"></script>
+<script src="js/xlsx.js?v=__BUILD__"></script>
 <script src="js/csv.js?v=__BUILD__"></script>
 <script src="js/mapping.js?v=__BUILD__"></script>
 <script src="js/metrics.js?v=__BUILD__"></script>

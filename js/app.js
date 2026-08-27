@@ -2124,14 +2124,33 @@ async function handleFiles(fileList) {
     renderMessages(["ファイルサイズの合計が大きすぎます(20MBまで)。"], []);
     return;
   }
-  try {
-    const sources = [];
-    for (const f of files) sources.push({ name: f.name, text: await decodeFile(f) });
-    applySources(sources);
-  } catch (err) {
-    renderMessages([`ファイルを読み込めませんでした: ${err.message}`], []);
-    showEmptyState();
+  const sources = [];
+  const fileErrors = [];
+  for (const f of files) {
+    try {
+      if (isXlsxName(f.name)) {
+        const sheets = await readXlsxSheets(await f.arrayBuffer());
+        if (sheets.length === 0) throw new Error("データの入ったシートがありません");
+        const base = baseName(f.name);
+        for (const sh of sheets) {
+          const nm = sheets.length > 1 ? `${base}_${sh.name}.csv` : `${base}.csv`;
+          sources.push({ name: nm, text: xlsxRowsToCSV(sh.rows) });
+        }
+      } else if (/\.xls$/i.test(f.name)) {
+        throw new Error("旧形式(.xls)は読み込めません。Excelで .xlsx として保存し直してください");
+      } else {
+        sources.push({ name: f.name, text: await decodeFile(f) });
+      }
+    } catch (err) {
+      fileErrors.push(`${f.name}: ${err.message}`);
+    }
   }
+  if (sources.length === 0) {
+    renderMessages(fileErrors.length ? fileErrors : ["読み込めるファイルがありませんでした。"], []);
+    return;
+  }
+  applySources(sources);
+  if (fileErrors.length) renderMessages(fileErrors, ["上記以外のファイルは読み込みました。"]);
 }
 
 function clearAll() {
@@ -2193,7 +2212,15 @@ async function handleMappingFile(fileList) {
   const files = [...fileList];
   if (files.length === 0) return;
   try {
-    const text = await decodeFile(files[0]);
+    let text;
+    if (isXlsxName(files[0].name)) {
+      // Excelのマッピング表は先頭のデータ入りシートを使う
+      const sheets = await readXlsxSheets(await files[0].arrayBuffer());
+      if (sheets.length === 0) throw new Error("データの入ったシートがありません");
+      text = xlsxRowsToCSV(sheets[0].rows);
+    } else {
+      text = await decodeFile(files[0]);
+    }
     if (!setMapping(text)) return;
     const n = state.mapping.entries.size;
     if (state.sources.length) {
