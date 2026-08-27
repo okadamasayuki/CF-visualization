@@ -39,6 +39,7 @@ jobs:
         run: |
           sed -i "s/__BUILD__/${GITHUB_SHA::8}/g" index.html
           cp index.html "build-${GITHUB_SHA::8}.html"
+          cp index.html latest.html
 
       # ビルド不要の静的サイトなので、リポジトリ全体をそのまま公開する
       - uses: actions/upload-pages-artifact@v3
