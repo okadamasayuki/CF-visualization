@@ -801,6 +801,8 @@ tr.rv-unmatched td { color: var(--bad); }
   .map-row .map-target { grid-column: 1 / 2; }
 }
 
+.build-id { margin-left: 10px; color: var(--text-muted); font-size: 11px; }
+
 .share-locate { margin: 0 0 10px; }
 .share-locate .toolbar { margin-bottom: 8px; }
 .share-locate .hint { margin: 0; }
