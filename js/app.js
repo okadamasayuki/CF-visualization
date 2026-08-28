@@ -865,7 +865,7 @@ function renderOverviewChart() {
         el("div", { class: "tt-title", text: item.name }),
         el("div", { class: "tt-value", text: `${measure.label}: ${fmtBy(measure.kind, item.value)}` }),
         el("div", { class: "tt-value", text: `営業CF: ${fmt(d.metrics.operatingCF)}` }),
-        el("div", { class: "tt-hint", text: "クリックで明細を表示" }),
+        el("div", { class: "tt-hint", text: "クリックで選択" }),
       );
       positionTooltip(tooltip, svg, ev);
     });
@@ -991,7 +991,7 @@ function renderOverviewCards() {
       { ok: r.ok, selected: r.name === state.company });
     box.setAttribute("role", "button");
     box.setAttribute("tabindex", "0");
-    box.setAttribute("aria-label", `${r.name}のサマリーを表示`);
+    box.setAttribute("aria-label", `${r.name}を選択`);
     box.addEventListener("click", () => selectCompany(r.name));
     box.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); selectCompany(r.name); }
@@ -1798,9 +1798,9 @@ function selectCompany(name) {
   if (!state.byKey.has(keyOf(name, state.period))) return;
   state.company = name;
   document.getElementById("company-select").value = name;
+  // タブは移動しない(全社比較で会社をクリックしても比較画面を見たままにする)。
+  // 明細は上部の会社セレクタが切り替わっているので、サマリータブを開けば見られる
   renderAll();
-  // タブは切り替えるが、画面は自動でスクロールさせない(見ていた位置が動くため)
-  selectTab("summary");
 }
 
 function renderSelectors() {
