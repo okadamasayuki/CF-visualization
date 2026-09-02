@@ -12,6 +12,9 @@
  *   data/*.xlsx / *.xlsm               Excelを直接置いてもよい(読み込み時に変換)
  *   overrides/<会社>_<四半期>.json     詳細入力(その会社・四半期の上書き値)
  *   settings.json                      表示区分などの設定と最終更新の記録
+ *   mapping.csv                        科目マッピング(読み込んでいるときだけ)
+ *   <その他の場所>/*.csv, *.xlsx       利用者が直接置いた元データ(フォルダ直下・
+ *                                      「元データ/」などのサブフォルダ)。読むだけで書き戻さない
  *
  * 競合について: ファイル単位の「最後に書いた人が勝つ」方式。
  * 自動書き出しでは既存ファイルを消さないので、他の人が置いたファイルは残る。
@@ -27,7 +30,14 @@ const SHARE_SETTINGS = "settings.json";
 const SHARE_MAPPING = "mapping.csv"; // 科目マッピング(算定ロジックファイル)
 const SHARE_PUSH_DELAY = 1200; // 連続した変更をまとめる待ち時間(ms)
 
-/** この環境で共有フォルダ連携が使えるか(Chrome/Edge のデスクトップ + HTTPS) */
+/* data/ の外に置かれた元データも読む。
+ * 「保存版HTMLと同じフォルダに 元データ/ を作り、そこへCSVを足していく」使い方のため、
+ * フォルダ直下とサブフォルダ(SHARE_SCAN_DEPTH 段まで)の CSV・Excel を読み込み対象にする。
+ * これらは利用者が直接置いたファイルなので、data/ へ写しを作らず、消しもしない。 */
+const SHARE_SCAN_DEPTH = 3;
+const SHARE_SKIP_DIRS = new Set([SHARE_DATA_DIR, SHARE_OVERRIDE_DIR, "css", "js", "scripts", "node_modules"]);
+
+/** この環境で共有フォルダ連携が使えるか(Chrome/Edge のデスクトップ。HTTPS か file:// で開いていること) */
 function shareSupported() {
   return typeof window.showDirectoryPicker === "function" && window.isSecureContext;
 }
@@ -149,6 +159,47 @@ async function listFiles(dir, filter) {
   return out;
 }
 
+const isDataName = (n) => /\.(csv|tsv|txt)$/i.test(n) || isXlsxName(n);
+
+/** 読み込み対象にしないファイル(設定・マッピング・Excelのロックファイル・隠しファイル) */
+function isIgnoredName(name) {
+  return name === SHARE_SETTINGS || name === SHARE_MAPPING
+    || name.startsWith(".") || name.startsWith("~$");
+}
+
+/**
+ * フォルダ内の元データファイルを一覧する。
+ *  - data/ の中     … このツールが書き出したもの(external: false)
+ *  - それ以外の場所 … 利用者が直接置いたもの(external: true)。フォルダ直下と
+ *                     サブフォルダ(SHARE_SCAN_DEPTH 段まで)を見る
+ * @returns {Promise<Array<{name:string, handle:FileSystemFileHandle, path:string, external:boolean}>>}
+ */
+async function listDataEntries(dir) {
+  const out = [];
+  const dataDir = await getDir(dir, SHARE_DATA_DIR, false);
+  for (const { name, handle } of await listFiles(dataDir, (n) => isDataName(n) && !isIgnoredName(n))) {
+    out.push({ name, handle, path: `${SHARE_DATA_DIR}/${name}`, external: false });
+  }
+  const walk = async (d, prefix, depth) => {
+    const files = [];
+    const subs = [];
+    for await (const [name, handle] of d.entries()) {
+      if (handle.kind === "directory") {
+        const skip = name.startsWith(".") || (prefix === "" && SHARE_SKIP_DIRS.has(name));
+        if (depth < SHARE_SCAN_DEPTH && !skip) subs.push({ name, handle });
+      } else if (handle.kind === "file" && isDataName(name) && !isIgnoredName(name)) {
+        files.push({ name, handle });
+      }
+    }
+    files.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+    for (const f of files) out.push({ name: f.name, handle: f.handle, path: prefix + f.name, external: true });
+    subs.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+    for (const s of subs) await walk(s.handle, `${prefix}${s.name}/`, depth + 1);
+  };
+  await walk(dir, "", 0);
+  return out;
+}
+
 /* ---------- 接続 ---------- */
 
 /** フォルダを選んでもらう。キャンセルされたら null */
@@ -176,6 +227,14 @@ async function shareRestore(interactive) {
   return handle;
 }
 
+/** 前回のフォルダの名前だけを返す(許可を求めずに分かる)。なければ null */
+async function shareSavedName() {
+  try {
+    const handle = await idbGetHandle();
+    return handle ? handle.name : null;
+  } catch (_) { return null; }
+}
+
 async function shareEnsurePermission(handle, interactive) {
   const opts = { mode: "readwrite" };
   if ((await handle.queryPermission(opts)) === "granted") return true;
@@ -192,34 +251,46 @@ async function shareEnsurePermission(handle, interactive) {
 async function shareRead(dir) {
   const stamps = new Map();
   const sources = [];
-  const dataDir = await getDir(dir, SHARE_DATA_DIR, false);
+
+  // data/ の中と、利用者が直接置いたファイル(フォルダ直下・サブフォルダ)をまとめて集める
+  const entries = await listDataEntries(dir);
+  const files = new Map(); // path → File
+  for (const e of entries) {
+    const file = await e.handle.getFile();
+    files.set(e.path, file);
+    stamps.set(e.path, file.lastModified);
+  }
+  // 利用者が直接置いたファイルと同じ名前が data/ にもあれば、data/ 側は以前の写しとみなして読まない
+  const externalNames = new Set(entries.filter((e) => e.external).map((e) => e.name));
+  const isShadowed = (e) => !e.external && externalNames.has(e.name);
+  // 直接置いたファイルは、どこから来たかを残す(data/ へ書き戻さない・整理で消さないため)
+  const tag = (e, src) => (e.external ? { ...src, external: true, path: e.path } : src);
 
   // まずExcel(.xlsx / .xlsm)を読む。会計システムの出力をそのまま
   // フォルダへ置く運用に対応する。シートはCSVに変換して取り込む
   const fromXlsx = new Set(); // 変換で生まれたファイル名(同名CSVとの二重読み防止)
-  for (const { name, handle } of await listFiles(dataDir, (n) => isXlsxName(n))) {
-    const file = await handle.getFile();
-    stamps.set(`${SHARE_DATA_DIR}/${name}`, file.lastModified);
+  for (const e of entries) {
+    if (!isXlsxName(e.name) || isShadowed(e)) continue;
+    const file = files.get(e.path);
     try {
       const sheets = await readXlsxSheets(await file.arrayBuffer());
-      const base = name.replace(/\.[^.]+$/, "");
+      const base = e.name.replace(/\.[^.]+$/, "");
       for (const sh of sheets) {
         const nm = sheets.length > 1 ? `${base}_${sh.name}.csv` : `${base}.csv`;
         fromXlsx.add(nm);
-        sources.push({ name: nm, text: xlsxRowsToCSV(sh.rows), note: xlsxSheetNote(sh.stats) });
+        sources.push(tag(e, { name: nm, text: xlsxRowsToCSV(sh.rows), note: xlsxSheetNote(sh.stats) }));
       }
     } catch (err) {
       // 読めないExcelも「何が起きたか」を画面に出す(空のCSVとして流し、注記を添える)
-      sources.push({ name, text: "", note: `Excelとして読めませんでした: ${err.message}` });
+      sources.push(tag(e, { name: e.name, text: "", note: `Excelとして読めませんでした: ${err.message}` }));
     }
   }
 
-  for (const { name, handle } of await listFiles(dataDir, (n) => /\.(csv|tsv|txt)$/i.test(n))) {
+  for (const e of entries) {
+    if (isXlsxName(e.name) || isShadowed(e)) continue;
     // 同じ名前のExcelから変換済みなら、過去に書き出したCSVのほうは読まない
-    if (fromXlsx.has(name)) continue;
-    const file = await handle.getFile();
-    sources.push({ name, text: await decodeFile(file) });
-    stamps.set(`${SHARE_DATA_DIR}/${name}`, file.lastModified);
+    if (fromXlsx.has(e.name)) continue;
+    sources.push(tag(e, { name: e.name, text: await decodeFile(files.get(e.path)) }));
   }
 
   const overrides = {};
@@ -276,6 +347,8 @@ async function shareWrite(dir, payload, { prune = false, by = "", scheme = null 
   const dataDir = await dir.getDirectoryHandle(SHARE_DATA_DIR, { create: true });
   const wantData = new Set();
   for (const src of payload.sources) {
+    // 利用者がフォルダに直接置いたファイルは、そこにあるものが原本。写しは作らない
+    if (src.external) continue;
     let name = fileNameFor(src.name, scheme);
     if (!/\.(csv|tsv|txt)$/i.test(name)) name += ".csv";
     wantData.add(name);
@@ -287,8 +360,8 @@ async function shareWrite(dir, payload, { prune = false, by = "", scheme = null 
       if (!wantData.has(name) && !isXlsxName(name)) await dataDir.removeEntry(name);
     }
   }
-  for (const { name, handle } of await listFiles(dataDir)) {
-    stamps.set(`${SHARE_DATA_DIR}/${name}`, (await handle.getFile()).lastModified);
+  for (const e of await listDataEntries(dir)) {
+    stamps.set(e.path, (await e.handle.getFile()).lastModified);
   }
 
   // --- overrides/ ---
@@ -340,12 +413,12 @@ async function shareWrite(dir, payload, { prune = false, by = "", scheme = null 
 /** フォルダの現在の更新時刻を一覧する(中身は読まない) */
 async function shareStamps(dir) {
   const stamps = new Map();
-  for (const [sub, filter] of [[SHARE_DATA_DIR, (n) => /\.(csv|tsv|txt)$/i.test(n)],
-                               [SHARE_OVERRIDE_DIR, (n) => /\.json$/i.test(n)]]) {
-    const d = await getDir(dir, sub, false);
-    for (const { name, handle } of await listFiles(d, filter)) {
-      stamps.set(`${sub}/${name}`, (await handle.getFile()).lastModified);
-    }
+  for (const e of await listDataEntries(dir)) {
+    stamps.set(e.path, (await e.handle.getFile()).lastModified);
+  }
+  const ovDir = await getDir(dir, SHARE_OVERRIDE_DIR, false);
+  for (const { name, handle } of await listFiles(ovDir, (n) => /\.json$/i.test(n))) {
+    stamps.set(`${SHARE_OVERRIDE_DIR}/${name}`, (await handle.getFile()).lastModified);
   }
   const s = await readFile(dir, SHARE_SETTINGS);
   if (s) stamps.set(SHARE_SETTINGS, s.modified);

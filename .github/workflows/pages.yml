@@ -41,6 +41,11 @@ jobs:
           cp index.html "build-${GITHUB_SHA::8}.html"
           cp index.html latest.html
 
+      # CSS/JS を埋め込んだ1ファイル版(保存版)。画面の「ツール本体をHTMLで保存」と同じもので、
+      # <ページのURL>/CF計算書ジェネレーター.html から直接ダウンロードもできる
+      - name: Build standalone HTML
+        run: node scripts/build-standalone.js
+
       # ビルド不要の静的サイトなので、リポジトリ全体をそのまま公開する
       - uses: actions/upload-pages-artifact@v3
         with:

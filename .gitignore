@@ -1,0 +1,3 @@
+# scripts/build-standalone.js の出力(CIで生成する。手元で作ったものはコミットしない)
+/CF計算書ジェネレーター.html
+node_modules/

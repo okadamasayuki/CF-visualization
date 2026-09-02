@@ -722,6 +722,28 @@ tr.has-note { cursor: help; }
 .period-chip:hover { border-color: var(--accent); }
 .period-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* ---- 前回のフォルダへの再接続の案内(ページ上部と読み込み画面) ---- */
+.share-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0 0;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+}
+.share-banner .text { flex: 1 1 260px; }
+.modal .share-banner { margin: 0 0 14px; }
+
+/* ---- ツール本体の保存 ---- */
+#local-card .toolbar { margin-top: 4px; }
+#local-card .file-status { min-height: 0; }
+#local-card .file-status:empty { display: none; }
+
 /* ---- 共有フォルダ ---- */
 .share-path {
   margin: 12px 0 10px;

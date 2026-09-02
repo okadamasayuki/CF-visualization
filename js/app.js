@@ -39,7 +39,8 @@ const state = {
   sources: [],
   tab: "summary",
   // 共有フォルダ連携の状態(dir はディレクトリハンドル)
-  share: { dir: null, auto: true, stamps: new Map(), busy: false, timer: null, suppress: false, scheme: null, saved: false, folderPath: "" },
+  share: { dir: null, auto: true, stamps: new Map(), busy: false, timer: null, suppress: false, scheme: null, saved: false, folderPath: "",
+    savedName: "", bannerText: "", bannerDismissed: false },
   derivLine: 0,           // 算定ロジックで選択中のCF行
   detailPreviewLimit: 20, // 詳細テンプレートのプレビュー行数
   overrides: {},          // 画面で手入力した詳細情報(ファイルに残らないので別途保存)
@@ -2512,8 +2513,9 @@ function renderShare() {
   if (!supported) {
     shareEl("share-unsupported-text").textContent = window.isSecureContext
       ? "このブラウザは共有フォルダの直接読み書きに対応していません(パソコンの Chrome / Edge が必要です。iPhone・iPad・Android・Safari・Firefox は非対応)。共有フォルダに置いたCSVを上のドラッグ&ドロップで読み込み、「読み込んだ内容をCSVで保存」で書き戻す使い方はできます。"
-      : "共有フォルダの直接読み書きには HTTPS でのアクセスが必要です。GitHub Pages の URL から開いてください。";
+      : "フォルダの直接読み書きには HTTPS でのアクセスが必要です。GitHub Pages の URL から開くか、「ツール本体をHTMLで保存」で保存したファイルをダブルクリックで開いてください(保存したファイルなら使えます)。";
     shareEl("share-state").textContent = "使えません";
+    renderShareBanner();
     return;
   }
 
@@ -2540,6 +2542,26 @@ function renderShare() {
   ]) shareEl(id).hidden = !show;
   shareEl("share-auto").checked = state.share.auto;
   shareEl("btn-share-reconnect").hidden = connected || !state.share.saved;
+  renderShareBanner();
+}
+
+/**
+ * 前回のフォルダに、ワンクリックで戻れる案内。
+ * ページ上部(データが表示されているとき)と読み込み画面(まだ何もないとき)の両方に出す。
+ * ブラウザの安全上の仕組みで、フォルダの再読み込みには利用者の操作が1回必要なため、
+ * その1回を目立つ場所に置いておく。
+ */
+function renderShareBanner() {
+  const sh = state.share;
+  const show = shareSupported() && sh.saved && !sh.dir && !sh.bannerDismissed;
+  for (const banner of document.querySelectorAll(".share-banner")) {
+    banner.hidden = !show;
+    if (!show) continue;
+    banner.querySelector(".text").textContent = sh.bannerText
+      || (sh.savedName
+        ? `前回使ったフォルダ「${sh.savedName}」があります。再接続すると、フォルダにあるデータ(あとから置いたファイルも)を読み込みます。`
+        : "前回使ったフォルダがあります。再接続すると、フォルダにあるデータ(あとから置いたファイルも)を読み込みます。");
+  }
 }
 
 /** 変更のたびに呼ばれる。自動書き出しが有効なら、少し待ってからまとめて書く */
@@ -2636,8 +2658,11 @@ async function sharePull() {
   }
 }
 
-/** フォルダに接続したときの初期動作を決める */
-async function shareAfterConnect() {
+/**
+ * フォルダに接続したときの初期動作を決める。
+ * @param restored 前回のフォルダに戻ってきた場合 true(新しく選んだ場合は false)
+ */
+async function shareAfterConnect({ restored = false } = {}) {
   const sh = state.share;
   renderShare();
   let peek;
@@ -2678,6 +2703,11 @@ async function shareAfterConnect() {
     return;
   }
   if (folderHas && localHas) {
+    // 前回と同じフォルダに戻ってきて、この端末にあるファイルがすべてフォルダにもあるなら、
+    // フォルダのほうが新しい(他の人の更新や、あとから置いたファイルを含む)ので、そのまま読み込む。
+    // こうすると「HTMLをダブルクリック → 再接続」だけで最新の状態になる
+    const folderNames = new Set(peek.sources.map((s) => s.name));
+    if (restored && state.sources.every((s) => folderNames.has(s.name))) { await sharePull(); return; }
     shareStatus(`共有フォルダに ${peek.sources.length}ファイル、この端末に ${state.sources.length}ファイルあります。どちらを使うか、下のボタンで選んでください。`, "");
     return;
   }
@@ -2708,7 +2738,7 @@ async function shareReconnect() {
       return;
     }
     state.share.dir = handle;
-    await shareAfterConnect();
+    await shareAfterConnect({ restored: true });
   } catch (err) {
     shareStatus(`再接続できませんでした: ${err.message}`, "ng");
   }
@@ -2718,7 +2748,8 @@ async function shareReconnect() {
 async function shareDisconnect() {
   if (state.share.timer) clearTimeout(state.share.timer);
   state.share = { dir: null, auto: state.share.auto, stamps: new Map(), busy: false,
-    timer: null, suppress: false, scheme: null, saved: false, folderPath: "" };
+    timer: null, suppress: false, scheme: null, saved: false, folderPath: "",
+    savedName: "", bannerText: "", bannerDismissed: false };
   try { await idbDelHandle(); } catch (_) { /* 無視 */ }
   shareStatus("接続を解除しました。この端末のデータはそのまま残ります。", "");
   renderShare();
@@ -2744,6 +2775,20 @@ function bindShareUI() {
 
   shareEl("btn-share-pick").addEventListener("click", shareConnect);
   shareEl("btn-share-reconnect").addEventListener("click", shareReconnect);
+  // ページ上部・読み込み画面の案内からの再接続
+  for (const btn of document.querySelectorAll(".share-banner .btn-reconnect")) {
+    btn.addEventListener("click", async () => {
+      state.share.bannerText = "フォルダに再接続しています…";
+      renderShareBanner();
+      await shareReconnect();
+      // つながらなかったときは、理由を案内のほうにも出す(読み込み画面が閉じていても分かるように)
+      state.share.bannerText = state.share.dir ? "" : shareEl("share-status").textContent;
+      renderShareBanner();
+    });
+  }
+  for (const btn of document.querySelectorAll(".share-banner .btn-dismiss")) {
+    btn.addEventListener("click", () => { state.share.bannerDismissed = true; renderShareBanner(); });
+  }
   shareEl("btn-share-pull").addEventListener("click", () => sharePull());
   shareEl("btn-share-reload").addEventListener("click", () => sharePull());
   shareEl("btn-share-push").addEventListener("click", () => sharePush());
@@ -2801,17 +2846,61 @@ function bindShareUI() {
   try { state.share.auto = localStorage.getItem(SHARE_AUTO_KEY) !== "0"; } catch (_) { /* 無視 */ }
 
   // 前回のフォルダがあれば、押すだけで戻れるようにしておく(再許可には操作が要る)
-  shareRestore(false).then((handle) => {
+  // (ブラウザが「今後も許可」を覚えている場合は、操作なしでそのままつながる)
+  shareRestore(false).then(async (handle) => {
     if (!handle) return;
     state.share.saved = true;
     if (handle === "needs-permission") {
+      state.share.savedName = (await shareSavedName()) || "";
       shareStatus("前回の共有フォルダがあります。「共有フォルダに再接続」を押すと、選び直さずに使えます。", "");
       renderShare();
       return;
     }
     state.share.dir = handle;
-    shareAfterConnect().then(renderShare);
+    shareAfterConnect({ restored: true }).then(renderShare);
   }).catch(() => { /* 無視 */ });
+}
+
+/* =========================================================
+ * ツール本体の保存(単一HTML化)
+ *
+ * 実際の組み立ては js/standalone.js が担当する。
+ * ======================================================= */
+
+async function saveToolHtml() {
+  const status = document.getElementById("save-tool-status");
+  status.textContent = "保存用のファイルを作っています…";
+  try {
+    let html = PRISTINE_HTML;
+    if (!isStandaloneBuild()) {
+      // 部品(CSS・JS)を取りに行って1つのHTMLにまとめる。file:// で開いた
+      // フォルダ版(git clone など)ではブラウザが取得を許さないので、下のエラー案内になる
+      html = await buildStandaloneHtml(PRISTINE_HTML, async (path) => {
+        const res = await fetch(path, { cache: "no-cache" });
+        if (!res.ok) throw new Error(`${path} を取得できませんでした(${res.status})`);
+        return res.text();
+      });
+    }
+    downloadBlob(STANDALONE_FILE_NAME, new Blob([html], { type: "text/html;charset=utf-8" }));
+    status.textContent = `「${STANDALONE_FILE_NAME}」を保存しました。ダウンロードフォルダから使いたいフォルダへ移し、ダブルクリックで開けます。`;
+  } catch (err) {
+    status.textContent = location.protocol === "file:" && !isStandaloneBuild()
+      ? "この開き方(フォルダ版を file:// で開いている状態)では部品ファイルを集められません。GitHub Pages の URL から開いて保存してください。"
+      : `保存用のファイルを作れませんでした: ${err.message}`;
+  }
+}
+
+function bindStandaloneUI() {
+  document.getElementById("btn-save-tool").addEventListener("click", saveToolHtml);
+  const badge = document.getElementById("local-state");
+  if (isStandaloneBuild()) {
+    const stamp = document.querySelector(`meta[name="${STANDALONE_META}"]`).getAttribute("content") || "";
+    badge.textContent = `いま開いているのは保存版です${stamp ? `(${stamp} 作成)` : ""}`;
+    const build = document.querySelector(".build-id");
+    if (build) build.textContent += ` / 保存版${stamp ? ` ${stamp}` : ""}`;
+  } else {
+    badge.hidden = true;
+  }
 }
 
 /* =========================================================
@@ -2982,6 +3071,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindSourceModal();
   bindMappingUI();
   bindShareUI();
+  bindStandaloneUI();
   // まだ何も読み込まれていなければ、読み込み画面を開いた状態で始める
   if (!hasData()) openSourceModal();
 });

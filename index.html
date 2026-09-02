@@ -17,6 +17,13 @@
 </header>
 
 <main>
+  <!-- ===== 前回のフォルダへの再接続(ワンクリック) ===== -->
+  <div id="share-banner-page" class="share-banner" hidden>
+    <span class="text"></span>
+    <button type="button" class="btn btn-secondary btn-reconnect">フォルダに再接続して読み込む</button>
+    <button type="button" class="btn btn-ghost btn-dismiss">閉じる</button>
+  </div>
+
   <!-- ===== 会社・四半期の選択 ===== -->
   <section id="selector-bar" class="selector-bar" hidden>
     <label id="company-field" class="field">会社
@@ -270,6 +277,11 @@
       <h2 id="source-modal-title">データの読み込み</h2>
       <button id="btn-close-source" type="button" class="btn btn-ghost" aria-label="閉じる">✕ 閉じる</button>
     </div>
+    <div id="share-banner-modal" class="share-banner" hidden>
+      <span class="text"></span>
+      <button type="button" class="btn btn-secondary btn-reconnect">フォルダに再接続して読み込む</button>
+      <button type="button" class="btn btn-ghost btn-dismiss">閉じる</button>
+    </div>
     <section class="card">
       <label id="dropzone" class="dropzone" for="file-input">
         <input type="file" id="file-input" accept=".csv,.tsv,.txt,.xlsx,.xlsm,text/csv" multiple hidden>
@@ -357,6 +369,44 @@
       </details>
     </section>
 
+      <!-- ツール本体の保存(ローカルで使う) -->
+      <section class="card" id="local-card">
+        <div class="chart-head">
+          <h3>ツール本体を保存してローカルで使う <span id="local-state" class="count-badge"></span></h3>
+        </div>
+        <p class="hint">
+          このツールを<strong>1つのHTMLファイル</strong>として保存します。保存したファイルはダブルクリックで開くだけで、
+          インターネットや GitHub Pages がなくても同じように動きます(パソコンの Chrome / Edge)。
+          公開ページが使えなくなっても、ファイルを持っている人はそのまま使い続けられます。
+        </p>
+        <div class="toolbar">
+          <button id="btn-save-tool" type="button" class="btn btn-secondary">ツール本体をHTMLで保存</button>
+        </div>
+        <p id="save-tool-status" class="file-status"></p>
+        <details class="format-help">
+          <summary>保存したHTMLと元データを同じフォルダに置き、開いたら自動で読み込む</summary>
+          <p>次のようにフォルダを作り、下の「共有フォルダ」で<strong>そのフォルダ</strong>を指定してください。
+            フォルダの中(サブフォルダも含む)にある CSV・Excel をすべて読み込みます。</p>
+<pre><code>CF-visualization/                ← 好きな場所に作ったフォルダ(共有フォルダとして指定する)
+  CF計算書ジェネレーター.html       ← 保存したツール本体(ダブルクリックで開く)
+  元データ/                        ← 元データを入れるフォルダ(名前は自由)
+    A社_202503.csv
+    A社_202506.csv
+    B社_202503.xlsx
+  data/  overrides/  settings.json  ← ツールが自動で作る保存用(触らなくてよい)</code></pre>
+          <ul>
+            <li>ファイル名は自由です(会社名と期間はファイルの中身から読み取ります)。「社名_年月」のようにしておくと管理しやすいです。
+              フォルダに直接置いたファイルは<strong>読むだけ</strong>で、ツールが書き替えたり消したりすることはありません。</li>
+            <li>次にHTMLを開いたとき、前回読み込んだ内容はそのまま表示され、上部に<strong>「フォルダに再接続して読み込む」</strong>の案内が出ます。
+              押すと、あとから置いたファイルや更新分も読み込みます。</li>
+            <li>ブラウザの安全上の仕組みで、フォルダの読み取りには<strong>開くたびに1回の許可操作</strong>が必要です。
+              Chrome / Edge の版によっては許可ダイアログに「今後も許可する」の選択肢が出ます。選ぶと、次回からは開くだけで自動的に読み込みます。</li>
+            <li>他の人に渡すときは、このフォルダごとコピーしてください。相手も同じ手順で使えます(相手側でもフォルダの指定が1回必要です)。</li>
+            <li>デスクトップやダウンロードのフォルダそのものは指定できないことがあります。その中に専用のフォルダを作って指定してください。</li>
+          </ul>
+        </details>
+      </section>
+
       <!-- 科目マッピング(算定ロジックファイル) -->
       <section class="card" id="mapping-card">
         <div class="chart-head">
@@ -419,8 +469,10 @@
           <h3>共有フォルダ <span id="share-state" class="count-badge">未接続</span></h3>
         </div>
         <p class="hint" id="share-lead">
-          社内の共有フォルダ(ネットワークドライブ、OneDrive・Google ドライブの同期フォルダなど)を指定すると、
+          社内の共有フォルダ(ネットワークドライブ、OneDrive・Google ドライブの同期フォルダなど)や、
+          保存したHTMLを置いたローカルのフォルダを指定すると、
           読み込んだデータ・詳細入力・科目マッピング(mapping.csv)をそのフォルダに保存し、次からはそこから読み込みます。
+          フォルダに直接置いた CSV・Excel(サブフォルダの中も)も読み込みます。
           同じフォルダを見ている人どうしで、データもマッピングも共有できます。
         </p>
         <div id="share-unsupported" class="message warn" hidden>
@@ -471,9 +523,11 @@
   data/         読み込んだCSVをそのまま置きます(Excelを直接置いてもOK)
   overrides/    詳細入力を 会社×四半期ごとのJSONで置きます
   mapping.csv   科目マッピング(読み込んでいるときだけ)
-  settings.json 表示区分・フォルダの場所などの設定と、最終更新の記録</code></pre>
+  settings.json 表示区分・フォルダの場所などの設定と、最終更新の記録
+  元データ/ など  自分で置いたCSV・Excel(直下やサブフォルダ)。読むだけで、書き替えも削除もしません</code></pre>
             <ul>
               <li><strong>ファイル単位で「最後に保存した人が勝ち」</strong>です。会社×四半期ごとにCSVを分けておくと、同時に作業してもぶつかりにくくなります。</li>
+              <li>自分で置いたファイルと同じ名前のファイルが data/ にもあるときは、自分で置いたほうを読みます(data/ 側は以前の写しとみなします)。</li>
               <li>他の人がフォルダを更新すると、このページに戻ったときに案内が出ます。読み込むまでこちらの表示は変わりません。</li>
               <li>自動書き出しでは、フォルダにある他のファイルを消しません。整理したいときだけ「完全に同期」を使ってください。</li>
               <li>接続したフォルダはブラウザが記憶します。次に開いたときは「共有フォルダに再接続」を押すと、選び直さずに使えます。</li>
@@ -499,5 +553,7 @@
 <script src="js/samples.js?v=__BUILD__"></script>
 <script src="js/tb.js?v=__BUILD__"></script>
 <script src="js/app.js?v=__BUILD__"></script>
+<!-- 最後に読み込む(この時点の素のHTMLを「ツール本体の保存」に使う) -->
+<script src="js/standalone.js?v=__BUILD__"></script>
 </body>
 </html>
