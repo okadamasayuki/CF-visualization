@@ -1903,6 +1903,7 @@ function renderAll() {
   if (state.tab === "logic") { renderDerivationDiagram(); renderDerivationText(); }
   if (state.tab === "detail") renderDetailPanel();
   renderTabs();
+  renderShareBanner();
 }
 
 function showEmptyState() {
@@ -1910,6 +1911,7 @@ function showEmptyState() {
   document.getElementById("btn-clear").hidden = true;
   document.getElementById("btn-export").hidden = true;
   renderTabs();
+  renderShareBanner();
 }
 
 /* =========================================================
@@ -2553,14 +2555,27 @@ function renderShare() {
  */
 function renderShareBanner() {
   const sh = state.share;
-  const show = shareSupported() && sh.saved && !sh.dir && !sh.bannerDismissed;
+  // reconnect: 前回のフォルダに戻る / pick: 配布されたZIPを展開して初めて開いた人向け(フォルダを選ぶ)
+  let mode = "";
+  if (shareSupported() && !sh.dir && !sh.bannerDismissed) {
+    if (sh.saved) mode = "reconnect";
+    else if (isStandaloneBuild() && !hasData()) mode = "pick";
+  }
   for (const banner of document.querySelectorAll(".share-banner")) {
-    banner.hidden = !show;
-    if (!show) continue;
-    banner.querySelector(".text").textContent = sh.bannerText
-      || (sh.savedName
+    banner.hidden = !mode;
+    if (!mode) continue;
+    banner.querySelector(".btn-reconnect").hidden = mode !== "reconnect";
+    banner.querySelector(".btn-pick").hidden = mode !== "pick";
+    let text = sh.bannerText;
+    if (!text && mode === "reconnect") {
+      text = sh.savedName
         ? `前回使ったフォルダ「${sh.savedName}」があります。再接続すると、フォルダにあるデータ(あとから置いたファイルも)を読み込みます。`
-        : "前回使ったフォルダがあります。再接続すると、フォルダにあるデータ(あとから置いたファイルも)を読み込みます。");
+        : "前回使ったフォルダがあります。再接続すると、フォルダにあるデータ(あとから置いたファイルも)を読み込みます。";
+    }
+    if (!text && mode === "pick") {
+      text = "このHTMLを置いたフォルダに元データ(CSV・Excel)があれば、そのフォルダを選ぶとまとめて読み込みます。次からは開くだけで表示されます。";
+    }
+    banner.querySelector(".text").textContent = text;
   }
 }
 
@@ -2786,6 +2801,13 @@ function bindShareUI() {
       renderShareBanner();
     });
   }
+  for (const btn of document.querySelectorAll(".share-banner .btn-pick")) {
+    btn.addEventListener("click", async () => {
+      await shareConnect();
+      state.share.bannerText = state.share.dir ? "" : shareEl("share-status").textContent;
+      renderShareBanner();
+    });
+  }
   for (const btn of document.querySelectorAll(".share-banner .btn-dismiss")) {
     btn.addEventListener("click", () => { state.share.bannerDismissed = true; renderShareBanner(); });
   }
@@ -2867,31 +2889,126 @@ function bindShareUI() {
  * 実際の組み立ては js/standalone.js が担当する。
  * ======================================================= */
 
+/** 保存版(単一HTML)の中身を用意する。すでに保存版ならそのまま */
+async function standaloneHtml() {
+  if (isStandaloneBuild()) return PRISTINE_HTML;
+  // 部品(CSS・JS)を取りに行って1つのHTMLにまとめる。file:// で開いた
+  // フォルダ版(git clone など)ではブラウザが取得を許さないので、呼び出し側でエラー案内になる
+  return buildStandaloneHtml(PRISTINE_HTML, async (path) => {
+    const res = await fetch(path, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`${path} を取得できませんでした(${res.status})`);
+    return res.text();
+  });
+}
+
+function saveToolError(err) {
+  return location.protocol === "file:" && !isStandaloneBuild()
+    ? "この開き方(フォルダ版を file:// で開いている状態)では部品ファイルを集められません。GitHub Pages の URL から開いて保存してください。"
+    : `保存用のファイルを作れませんでした: ${err.message}`;
+}
+
 async function saveToolHtml() {
   const status = document.getElementById("save-tool-status");
   status.textContent = "保存用のファイルを作っています…";
   try {
-    let html = PRISTINE_HTML;
-    if (!isStandaloneBuild()) {
-      // 部品(CSS・JS)を取りに行って1つのHTMLにまとめる。file:// で開いた
-      // フォルダ版(git clone など)ではブラウザが取得を許さないので、下のエラー案内になる
-      html = await buildStandaloneHtml(PRISTINE_HTML, async (path) => {
-        const res = await fetch(path, { cache: "no-cache" });
-        if (!res.ok) throw new Error(`${path} を取得できませんでした(${res.status})`);
-        return res.text();
-      });
-    }
+    const html = await standaloneHtml();
     downloadBlob(STANDALONE_FILE_NAME, new Blob([html], { type: "text/html;charset=utf-8" }));
     status.textContent = `「${STANDALONE_FILE_NAME}」を保存しました。ダウンロードフォルダから使いたいフォルダへ移し、ダブルクリックで開けます。`;
   } catch (err) {
-    status.textContent = location.protocol === "file:" && !isStandaloneBuild()
-      ? "この開き方(フォルダ版を file:// で開いている状態)では部品ファイルを集められません。GitHub Pages の URL から開いて保存してください。"
-      : `保存用のファイルを作れませんでした: ${err.message}`;
+    status.textContent = saveToolError(err);
+  }
+}
+
+const DISTRIBUTION_ZIP_NAME = "CF-visualization.zip";
+const DISTRIBUTION_DATA_DIR = "元データ";
+const DISTRIBUTION_README = "はじめにお読みください.txt";
+
+/** 配布用ZIPに同梱する説明文 */
+function distributionReadme(fileCount) {
+  return [
+    "CF計算書ジェネレーター 配布用フォルダ",
+    "",
+    "【使い方】",
+    "1. このZIPを展開(右クリック →「すべて展開」)し、できたフォルダを好きな場所に置く",
+    "   ※ デスクトップやダウンロードのフォルダそのものではなく、その中のフォルダとして置いてください",
+    "2. フォルダ内の「CF計算書ジェネレーター.html」をダブルクリックで開く(パソコンの Chrome / Edge)",
+    "3. 開いた画面の上部の案内「フォルダを選んで読み込む」から、このフォルダを選び、ブラウザの確認で「許可」を押す",
+    `   → 元データ/ の中のファイル(${fileCount}件)がまとめて読み込まれます。次からは開くだけで前回の内容が表示されます`,
+    "",
+    "【フォルダの中身】",
+    "CF計算書ジェネレーター.html  ツール本体(この1ファイルだけで動きます。インターネット接続は不要)",
+    `${DISTRIBUTION_DATA_DIR}/                   読み込んだ元データ(会社×四半期のCSV)。ここにファイルを足すと、次に開いたとき(再接続時)に反映されます`,
+    "overrides/                  詳細入力(入力してあった場合のみ)",
+    "mapping.csv                 科目マッピング(使っていた場合のみ)",
+    "settings.json               表示区分などの設定",
+    "",
+    "【注意】",
+    "- iPhone / iPad / Android / Safari / Firefox ではフォルダの自動読み込みは使えません。元データ/ のCSVをドラッグ&ドロップで読み込んでください。",
+    "- データは外部に送信されません。すべてお使いのパソコンの中だけで処理します。",
+    `- 作成日時: ${new Date().toLocaleString("ja-JP")}`,
+    "",
+  ].join("\r\n");
+}
+
+/** いまの状態(ツール本体 + データ + 設定)を、配布用フォルダの構成で並べる */
+async function buildDistributionFiles() {
+  const files = [{ name: STANDALONE_FILE_NAME, text: await standaloneHtml() }];
+  const used = new Set();
+  const unique = (n) => {
+    let k = n;
+    for (let i = 2; used.has(k); i++) k = n.replace(/(\.[^.]+)?$/, `_${i}$1`);
+    used.add(k);
+    return k;
+  };
+  for (const src of state.sources) {
+    // フォルダから直接読んだファイルは、元のサブフォルダの位置を保つ(名前はCSV化後のもの)
+    const dir = src.external && src.path && src.path.includes("/")
+      ? src.path.slice(0, src.path.lastIndexOf("/") + 1) : "";
+    let rel = dir + safeFileName(src.name);
+    if (!/\.(csv|tsv|txt)$/i.test(rel)) rel += ".csv";
+    if (!rel.startsWith(`${DISTRIBUTION_DATA_DIR}/`)) rel = `${DISTRIBUTION_DATA_DIR}/${rel}`;
+    files.push({ name: unique(rel), text: "﻿" + src.text });
+  }
+  for (const [key, values] of Object.entries(state.overrides || {})) {
+    if (!values || Object.keys(values).length === 0) continue;
+    const [company, period] = key.split("\u0000");
+    files.push({ name: `${SHARE_OVERRIDE_DIR}/${safeFileName(`${company}_${period}.json`)}`,
+      text: JSON.stringify({ company, period, values }, null, 2) });
+  }
+  if (state.mappingText) files.push({ name: SHARE_MAPPING, text: "﻿" + state.mappingText });
+  files.push({ name: SHARE_SETTINGS, text: JSON.stringify({
+    app: "CF-visualization",
+    nameScheme: "unicode",
+    interestPolicy: state.interestPolicy,
+    folderPath: "",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "",
+    files: state.sources.length,
+  }, null, 2) });
+  files.push({ name: DISTRIBUTION_README, text: "﻿" + distributionReadme(state.sources.length) });
+  return files;
+}
+
+async function saveDistributionZip() {
+  const status = document.getElementById("save-tool-status");
+  status.textContent = `配布用のZIPを作っています(${state.sources.length}ファイル)…`;
+  try {
+    const files = await buildDistributionFiles();
+    const bytes = await buildZip(files);
+    downloadBlob(DISTRIBUTION_ZIP_NAME, new Blob([bytes], { type: "application/zip" }));
+    const mb = bytes.length / 1024 / 1024;
+    const size = mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(bytes.length / 1024)} KB`;
+    status.textContent = `「${DISTRIBUTION_ZIP_NAME}」を保存しました(${files.length}ファイル / ${size})。`
+      + (state.sources.length ? "" : " データを読み込んでいないため、ツール本体と説明だけが入っています。")
+      + " 受け取った人は、展開 → HTMLをダブルクリック → 案内からフォルダを選ぶ、で使えます。";
+  } catch (err) {
+    status.textContent = saveToolError(err);
   }
 }
 
 function bindStandaloneUI() {
   document.getElementById("btn-save-tool").addEventListener("click", saveToolHtml);
+  document.getElementById("btn-save-zip").addEventListener("click", saveDistributionZip);
   const badge = document.getElementById("local-state");
   if (isStandaloneBuild()) {
     const stamp = document.querySelector(`meta[name="${STANDALONE_META}"]`).getAttribute("content") || "";

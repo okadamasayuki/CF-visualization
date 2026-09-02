@@ -21,6 +21,7 @@
   <div id="share-banner-page" class="share-banner" hidden>
     <span class="text"></span>
     <button type="button" class="btn btn-secondary btn-reconnect">フォルダに再接続して読み込む</button>
+    <button type="button" class="btn btn-secondary btn-pick" hidden>フォルダを選んで読み込む</button>
     <button type="button" class="btn btn-ghost btn-dismiss">閉じる</button>
   </div>
 
@@ -280,6 +281,7 @@
     <div id="share-banner-modal" class="share-banner" hidden>
       <span class="text"></span>
       <button type="button" class="btn btn-secondary btn-reconnect">フォルダに再接続して読み込む</button>
+      <button type="button" class="btn btn-secondary btn-pick" hidden>フォルダを選んで読み込む</button>
       <button type="button" class="btn btn-ghost btn-dismiss">閉じる</button>
     </div>
     <section class="card">
@@ -381,8 +383,19 @@
         </p>
         <div class="toolbar">
           <button id="btn-save-tool" type="button" class="btn btn-secondary">ツール本体をHTMLで保存</button>
+          <button id="btn-save-zip" type="button" class="btn">配布用ZIPで保存(ツール本体 + 読み込んだデータ)</button>
         </div>
         <p id="save-tool-status" class="file-status"></p>
+        <details class="format-help">
+          <summary>誰かに渡す:配布用ZIP(ツール本体と元データをまとめて圧縮)</summary>
+          <p>「配布用ZIPで保存」を押すと、ツール本体のHTMLと、いま読み込んでいる元データ(会社×四半期の全ファイル)・詳細入力・科目マッピングを
+            下の構成のまま1つのZIPに圧縮します。数百ファイルあってもZIP 1つなので、メールや共有ドライブでそのまま渡せます
+            (CSVは圧縮がよく効き、おおむね元の 1/5〜1/10 の大きさになります)。</p>
+          <p>受け取った人は、ZIPを展開してフォルダを好きな場所に置き、中の
+            <strong>CF計算書ジェネレーター.html をダブルクリック</strong> → 開いた画面の案内から<strong>そのフォルダを選ぶ</strong>だけで、
+            全データが読み込まれた状態になります。手順は同梱の「はじめにお読みください.txt」にも書いてあります。</p>
+          <p class="hint">※ 会社のメールで .zip や .html の添付が弾かれる場合は、OneDrive・SharePoint・Teams などのリンク共有で渡してください。</p>
+        </details>
         <details class="format-help">
           <summary>保存したHTMLと元データを同じフォルダに置き、開いたら自動で読み込む</summary>
           <p>次のようにフォルダを作り、下の「共有フォルダ」で<strong>そのフォルダ</strong>を指定してください。
@@ -401,7 +414,7 @@
               押すと、あとから置いたファイルや更新分も読み込みます。</li>
             <li>ブラウザの安全上の仕組みで、フォルダの読み取りには<strong>開くたびに1回の許可操作</strong>が必要です。
               Chrome / Edge の版によっては許可ダイアログに「今後も許可する」の選択肢が出ます。選ぶと、次回からは開くだけで自動的に読み込みます。</li>
-            <li>他の人に渡すときは、このフォルダごとコピーしてください。相手も同じ手順で使えます(相手側でもフォルダの指定が1回必要です)。</li>
+            <li>他の人に渡すときは、上の「配布用ZIPで保存」でこの構成のZIPを作るか、このフォルダごとコピーしてください。相手も同じ手順で使えます(相手側でもフォルダの指定が1回必要です)。</li>
             <li>デスクトップやダウンロードのフォルダそのものは指定できないことがあります。その中に専用のフォルダを作って指定してください。</li>
           </ul>
         </details>
@@ -552,6 +565,7 @@
 <script src="js/share.js?v=__BUILD__"></script>
 <script src="js/samples.js?v=__BUILD__"></script>
 <script src="js/tb.js?v=__BUILD__"></script>
+<script src="js/zip.js?v=__BUILD__"></script>
 <script src="js/app.js?v=__BUILD__"></script>
 <!-- 最後に読み込む(この時点の素のHTMLを「ツール本体の保存」に使う) -->
 <script src="js/standalone.js?v=__BUILD__"></script>

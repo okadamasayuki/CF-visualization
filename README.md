@@ -89,6 +89,16 @@ CF-visualization/                ← 好きな場所に作ったフォルダ(共
 
 保存版は、GitHub Pages のデプロイ時にも `scripts/build-standalone.js` で自動生成しています。手元で作るには `node scripts/build-standalone.js` を実行します。
 
+#### 誰かに渡す:配布用ZIP
+
+元データは会社×四半期で数百ファイルになるため、そのまま添付するのは現実的ではありません。読み込みモーダルの「**配布用ZIPで保存(ツール本体 + 読み込んだデータ)**」を押すと、上の構成をそのまま 1 つの ZIP(`CF-visualization.zip`)に圧縮します。
+
+- 中身: `CF計算書ジェネレーター.html`、`元データ/`(読み込んでいる全ファイルを CSV で)、`overrides/`(詳細入力があれば)、`mapping.csv`(科目マッピングがあれば)、`settings.json`、`はじめにお読みください.txt`
+- 圧縮はブラウザ内蔵の deflate(`CompressionStream`)で、CSV はおおむね元の 1/5〜1/10 になります。ファイル名は UTF-8 フラグ付きなので、Windows のエクスプローラーや macOS の標準展開で日本語名が化けません
+- 受け取った人は、展開したフォルダを好きな場所に置き、HTML をダブルクリック → 画面上部の案内「フォルダを選んで読み込む」でそのフォルダを選ぶだけです(初回に 1 回)
+- 会社のメールで `.zip` や `.html` の添付が弾かれる場合は、OneDrive・SharePoint・Teams などのリンク共有で渡してください
+- 実装: `js/zip.js`(ZIP の組み立て)と `js/app.js` の `buildDistributionFiles`
+
 ### 共有フォルダを使う(数人で共同利用する場合)
 
 ヘッダー右上の「読み込み」から開くモーダルの**共有フォルダ**から、社内の共有フォルダ(ネットワークドライブ、OneDrive・Google ドライブの同期フォルダなど)を指定すると、そのフォルダを保存先にできます。同じフォルダを見ている人どうしで同じデータを使えます。
@@ -370,6 +380,7 @@ js/samples.js              # サンプルCSVの埋め込み(自動生成)
 js/tb.js                   # サンプルの残高試算表形式への変換と試算表サンプルExcelの生成
 js/app.js                  # CF計算ロジックと画面の描画
 js/standalone.js           # ツール本体の保存(CSS・JSを埋め込んだ1ファイルHTMLの組み立て)
+js/zip.js                  # 配布用ZIPの書き出し(deflate圧縮・UTF-8ファイル名)
 scripts/gen-sample-27.js   # sample-27.csv を生成する
 scripts/build-samples.js   # sample*.csv から js/samples.js を生成する
 scripts/build-standalone.js # 保存版 CF計算書ジェネレーター.html を生成する(CIでも実行)
