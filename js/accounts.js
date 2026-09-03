@@ -166,14 +166,28 @@ function acctChanged(a) {
   return JSON.stringify(acctEdits().get(a.key)) !== state.acctInitial.get(a.key);
 }
 
-/** 表示グループ(編集後の状態で判定) */
-function acctGroup(a) {
-  const e = acctEdits().get(a.key);
+/** 表示グループ。e は編集状態(現在 or 直前の適用時点) */
+function acctGroupOf(a, e) {
   if (e.mode === "skip") return "skip";
   if (e.mode === "map") return "map";
   if (a.via === "none") return "none";
   if (a.via === "loose") return "loose";
   return "auto";
+}
+
+/** いまの編集内容でのグループ(バッジの表示に使う) */
+function acctGroup(a) {
+  return acctGroupOf(a, acctEdits().get(a.key));
+}
+
+/**
+ * 直前に適用した時点でのグループ。並び順・絞り込み・件数はこちらで決める。
+ * 編集のたびに行が別のグループへ飛んでいくと、いま触っていた行を見失うため、
+ * 「変更を適用」するまでは行の位置を動かさない。
+ */
+function acctBaseGroup(a) {
+  acctEdits();
+  return acctGroupOf(a, JSON.parse(state.acctInitial.get(a.key)));
 }
 
 function acctFieldLabel(section, key) {
@@ -194,7 +208,7 @@ function acctSorted() {
   const list = [...(state.accounts || [])];
   const codeNum = (c) => (/^\d+$/.test(c) ? Number(c) : Infinity);
   list.sort((a, b) => {
-    const g = ACCT_GROUP_ORDER.get(acctGroup(a)) - ACCT_GROUP_ORDER.get(acctGroup(b));
+    const g = ACCT_GROUP_ORDER.get(acctBaseGroup(a)) - ACCT_GROUP_ORDER.get(acctBaseGroup(b));
     if (g !== 0) return g;
     const c = codeNum(a.code) - codeNum(b.code);
     if (c !== 0 && !Number.isNaN(c)) return c;
@@ -208,7 +222,7 @@ function acctFilterFn() {
   const q = mappingKey(document.getElementById("acct-search").value);
   return (a) => {
     if (filter === "changed" && !acctChanged(a)) return false;
-    if (filter !== "all" && filter !== "changed" && acctGroup(a) !== filter) return false;
+    if (filter !== "all" && filter !== "changed" && acctBaseGroup(a) !== filter) return false;
     if (q && !mappingKey(a.code).includes(q) && ![...a.names].some((n) => mappingKey(n).includes(q))) return false;
     return true;
   };
@@ -219,12 +233,47 @@ function renderAccountsPanel() {
   if (!table) return;
   const edits = acctEdits();
   const all = acctSorted();
+  renderAcctSummary(all);
 
-  // 件数のまとめ(押すと絞り込み)
+  // 本体
+  const tbody = table.querySelector("tbody");
+  tbody.innerHTML = "";
+  const keep = acctFilterFn();
+  let shown = 0;
+  for (const a of all) {
+    if (!keep(a)) continue;
+    shown++;
+    tbody.append(...acctRows(a, edits.get(a.key)));
+  }
+  document.getElementById("acct-empty").hidden = shown > 0;
+}
+
+/**
+ * 1科目分の行だけをその場で書き換える(表全体は作り直さない)。
+ * 行の位置・スクロール位置を保ち、操作していた選択欄にフォーカスを戻す。
+ */
+function acctRefreshRow(a, focus) {
+  const tbody = document.querySelector("#acct-table tbody");
+  const old = tbody ? [...tbody.querySelectorAll(`tr[data-key="${CSS.escape(a.key)}"]`)] : [];
+  if (!tbody || old.length === 0) { renderAccountsPanel(); return; }
+  const fresh = acctRows(a, acctEdits().get(a.key));
+  old[0].before(...fresh);
+  for (const tr of old) tr.remove();
+  renderAcctSummary(acctSorted());
+  if (focus) {
+    const row = fresh[Math.min(focus.i, fresh.length - 1)];
+    const target = row && row.querySelector(`.${focus.cls}`);
+    if (target) target.focus({ preventScroll: true });
+  }
+}
+
+/** 件数のまとめ(押すと絞り込み)とボタンの状態 */
+function renderAcctSummary(all) {
   const counts = new Map(ACCT_GROUPS.map(([k]) => [k, 0]));
   let changed = 0;
   for (const a of all) {
-    counts.set(acctGroup(a), counts.get(acctGroup(a)) + 1);
+    const g = acctBaseGroup(a);
+    counts.set(g, counts.get(g) + 1);
     if (acctChanged(a)) changed++;
   }
   document.getElementById("acct-count").textContent = `${all.length}科目`;
@@ -253,18 +302,6 @@ function renderAccountsPanel() {
   document.getElementById("btn-acct-apply").disabled = changed === 0;
   document.getElementById("btn-acct-revert").hidden = changed === 0;
   document.getElementById("btn-acct-clear").hidden = !(state.mapping && state.mapping.entries.size);
-
-  // 本体
-  const tbody = table.querySelector("tbody");
-  tbody.innerHTML = "";
-  const keep = acctFilterFn();
-  let shown = 0;
-  for (const a of all) {
-    if (!keep(a)) continue;
-    shown++;
-    tbody.append(...acctRows(a, edits.get(a.key)));
-  }
-  document.getElementById("acct-empty").hidden = shown > 0;
 }
 
 /** 1科目分の行(反映先が複数なら複数行) */
@@ -276,6 +313,7 @@ function acctRows(a, e) {
 
   for (let i = 0; i < n; i++) {
     const tr = el("tr", { class: `acct-${group}${changed ? " acct-changed" : ""}` });
+    tr.dataset.key = a.key;
     if (i === 0) {
       const extra = a.names.size > 1 ? ` ほか${a.names.size - 1}表記` : "";
       tr.append(
@@ -305,6 +343,7 @@ function acctStateBadge(a, e) {
   const g = acctGroup(a);
   const [text, cls] = map[g];
   const wrap = el("div", { class: "acct-state" }, el("span", { class: `via-badge ${cls}`, text }));
+  if (acctChanged(a)) wrap.append(el("span", { class: "acct-sub acct-pending", text: "未適用の変更" }));
   // 登録済みでも、もとは自動判定だった場合はその根拠を小さく添える
   if ((g === "map" || g === "skip") && a.via && a.via !== "mapping" && a.via !== "skip" && a.via !== "none") {
     wrap.append(el("span", { class: "acct-sub", text: a.via === "loose" ? "元は表記ゆれ判定" : "元は自動判定" }));
@@ -356,7 +395,7 @@ function acctTargetCell(a, e, i) {
   // 行の削除(反映先が2つ以上のときだけ)
   const del = el("button", { type: "button", class: "map-del", text: "×", title: "この反映先を外す" });
   del.hidden = !(e.mode === "map" && e.targets.length > 1);
-  del.addEventListener("click", () => { e.targets.splice(i, 1); renderAccountsPanel(); });
+  del.addEventListener("click", () => { e.targets.splice(i, 1); acctRefreshRow(a, { cls: "acct-section", i: Math.max(0, i - 1) }); });
 
   sec.addEventListener("change", () => {
     const v = sec.value;
@@ -371,10 +410,11 @@ function acctTargetCell(a, e, i) {
       const base = a.targets.find((x) => x.section === v);
       e.targets[i] = { section: v, key: base ? base.key : SCHEMA[v][0].key, sign: e.targets[i].sign };
     }
-    renderAccountsPanel();
+    // 区分を選んだら、次に選ぶ「科目」へフォーカスを移す(自動・使わないのときは区分のまま)
+    acctRefreshRow(a, { cls: e.mode === "map" ? "acct-item" : "acct-section", i });
   });
-  item.addEventListener("change", () => { e.targets[i].key = item.value; renderAccountsPanel(); });
-  sign.addEventListener("change", () => { e.targets[i].sign = Number(sign.value); renderAccountsPanel(); });
+  item.addEventListener("change", () => { e.targets[i].key = item.value; acctRefreshRow(a, { cls: "acct-item", i }); });
+  sign.addEventListener("change", () => { e.targets[i].sign = Number(sign.value); acctRefreshRow(a, { cls: "acct-sign", i }); });
 
   row.append(sec, item, sign, del);
   td.append(row);
@@ -385,7 +425,7 @@ function acctTargetCell(a, e, i) {
     add.addEventListener("click", () => {
       const last = e.targets[e.targets.length - 1];
       e.targets.push({ section: last.section, key: last.key, sign: 1 });
-      renderAccountsPanel();
+      acctRefreshRow(a, { cls: "acct-section", i: e.targets.length - 1 });
     });
     td.append(add);
   }

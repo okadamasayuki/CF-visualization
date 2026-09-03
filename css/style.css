@@ -897,6 +897,7 @@ tr.rv-unmatched td { color: var(--bad); }
 .acct-table td.name { min-width: 160px; }
 .acct-table td.name span { display: block; }
 .acct-sub { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.acct-pending { color: var(--accent); }
 .acct-state { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .acct-target-cell { min-width: 420px; }
 .acct-target {
