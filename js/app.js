@@ -1775,7 +1775,8 @@ const TABS = [
   // CF計算書・財務指標・推移は1つの画面にまとめている
   { id: "summary", needs: hasData },
   { id: "overview", needs: () => hasData() && state.companies.length > 1 },
-  { id: "accounts", needs: hasData },
+  // 科目対応は、金額を1件も取り込めなかった(=データが無い)ときこそ必要なので、科目があれば出す
+  { id: "accounts", needs: () => hasData() || (state.accounts && state.accounts.length > 0) },
   { id: "detail", needs: hasData },
   { id: "logic", needs: hasData },
 ];
@@ -1785,8 +1786,9 @@ function visibleTabs() {
 }
 
 function selectTab(id) {
-  if (!hasData()) return;
-  if (!visibleTabs().some((t) => t.id === id)) id = "summary";
+  const shown = visibleTabs();
+  if (shown.length === 0) return;
+  if (!shown.some((t) => t.id === id)) id = hasData() ? "summary" : shown[0].id;
   state.tab = id;
   for (const t of TABS) {
     const btn = document.getElementById(`tab-${t.id}`);
@@ -1815,7 +1817,7 @@ function renderTabs() {
     if (shown.length === 0) document.getElementById(`panel-${t.id}`).hidden = true;
   }
   if (shown.length === 0) return;
-  selectTab(shown.includes(state.tab) ? state.tab : "summary");
+  selectTab(shown.includes(state.tab) ? state.tab : (hasData() ? "summary" : shown[0]));
 }
 
 /* =========================================================
@@ -2124,14 +2126,19 @@ function applySources(sources, { keepModalOpen = false } = {}) {
     renderMessages(errors, warnings);
     if (state.unmatchedNames.length) {
       // 全科目が社内独自名で取り込めなかったケース。ファイルは保持しておき、
-      // マッピングを適用したら再読み込みなしでこのファイルを再解釈できるようにする
+      // 科目対応タブで反映先を登録したら再読み込みなしでこのファイルを再解釈できるようにする
       state.sources = sources;
       saveState();
-      mappingStatus(`認識できなかった${state.unmatchedNames.length}件の科目を「マッピングを画面で編集」に入れました。反映先を選んで適用してください。`, "");
     }
     state.datasets = [];
     showEmptyState();
     document.getElementById("btn-clear").hidden = false;
+    if (state.accounts.length) {
+      // 科目対応タブが出るので、そこへ案内する(読み込み画面のエラーは残る)
+      state.tab = "accounts";
+      renderTabs();
+      if (!keepModalOpen) closeSourceModal();
+    }
     return;
   }
 
@@ -2143,9 +2150,6 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   status.textContent = `${label} を読み込みました(${state.companies.length}社${periodText} / ${matched}件の科目を認識)`;
   status.className = "file-status ok";
   renderMessages(errors, warnings);
-  if (state.unmatchedNames.length) {
-    mappingStatus(`認識できなかった${state.unmatchedNames.length}件の科目を「マッピングを画面で編集」に入れました。反映先を選んで適用してください。`, "");
-  }
   renderSelectors();
   renderAll();
   if (!keepModalOpen) closeSourceModal();
@@ -2215,20 +2219,14 @@ function clearAll() {
  * 科目マッピング(算定ロジックファイル)
  * ======================================================= */
 
+/** 対応表の状態表示は科目対応タブが担う(再描画はそちらで行う) */
 function renderMappingStatus() {
-  const badge = document.getElementById("mapping-state");
-  const active = !!state.mapping && state.mapping.entries.size > 0;
-  badge.textContent = active
-    ? `${state.mapping.entries.size}科目のマッピングを適用中`
-    : "組み込みの対応を使用中";
-  document.getElementById("btn-mapping-clear").hidden = !active;
+  if (state.tab === "accounts" && typeof renderAccountsPanel === "function") renderAccountsPanel();
 }
 
+/** 対応表に関する結果の表示先(科目対応タブの状態行) */
 function mappingStatus(text, kind = "") {
-  const el2 = document.getElementById("mapping-status");
-  el2.hidden = !text;
-  el2.textContent = text;
-  el2.className = `file-status ${kind}`;
+  if (typeof acctStatus === "function" && document.getElementById("acct-status")) acctStatus(text, kind);
 }
 
 /** マッピングを差し替えて、読み込み済みデータがあれば再計算する */
@@ -2271,77 +2269,33 @@ async function handleMappingFile(fileList) {
     const n = state.mapping.entries.size;
     if (state.sources.length) {
       applySources(state.sources, { keepModalOpen: true });
-      mappingStatus(`${n}科目のマッピングを読み込み、読み込み済みのデータを再計算しました。`, "ok");
+      mappingStatus(`対応表のCSVから${n}科目を読み込み、読み込み済みのデータを再計算しました。`, "ok");
     } else {
-      mappingStatus(`${n}科目のマッピングを読み込みました。次にCSVを読み込むと適用されます。`, "ok");
+      mappingStatus(`対応表のCSVから${n}科目を読み込みました。次にデータを読み込むと適用されます。`, "ok");
     }
     saveState();
   } catch (err) {
-    mappingStatus(`読み込めませんでした: ${err.message}`, "ng");
+    mappingStatus(`対応表のCSVを読み込めませんでした: ${err.message}`, "ng");
   }
-  document.getElementById("mapping-file-input").value = "";
+  const input = document.getElementById("acct-file-input");
+  if (input) input.value = "";
 }
 
-/* ---- 読み込み内訳(各科目をどの項目として読んだかの一覧) ---- */
-
-const RESOLVE_VIA = {
-  label: { text: "組み込み(正式名)", cls: "via-exact" },
-  alias: { text: "組み込み(別名)", cls: "via-exact" },
-  loose: { text: "表記ゆれを吸収", cls: "via-loose" },
-  mapping: { text: "マッピング", cls: "via-mapping" },
-  skip: { text: "使わない(登録)", cls: "via-mapping" },
-  none: { text: "認識できず", cls: "via-none" },
-};
+/* ---- 読み取りの診断(どの列をどう読んだか)。科目ごとの読み方は科目対応タブが担う ---- */
 
 function renderResolveReport() {
   const box = document.getElementById("resolve-report");
-  const body = document.getElementById("resolve-body");
-  if (!box || !body) return;
-  const items = state.resolvedNames || [];
-  const un = state.unmatchedNames || [];
-  if (items.length === 0 && un.length === 0) { box.hidden = true; return; }
+  if (!box) return;
+  const notes = state.layoutNotes || [];
+  const files = state.layoutDebug || [];
+  if (notes.length === 0 && files.length === 0) { box.hidden = true; return; }
   box.hidden = false;
-  document.getElementById("resolve-summary").textContent =
-    `科目の読み込み内訳を確認(${items.length + un.length}科目` +
-    (un.length ? ` / うち認識できず ${un.length}件` : "") + ")";
-  // どの列をどう読んだか(問い合わせ時にこの行を伝えてもらうと原因を特定できる)
   const layouts = document.getElementById("resolve-layouts");
-  if (layouts) {
-    const notes = state.layoutNotes || [];
-    layouts.hidden = notes.length === 0;
-    layouts.textContent = notes.length ? `読み取り方: ${notes.join(" / ")}` : "";
-  }
-  // セル種類の診断(科目名・金額は含まない)
+  layouts.hidden = notes.length === 0;
+  layouts.textContent = notes.length ? `読み取り方: ${notes.join(" / ")}` : "";
   const dbg = document.getElementById("resolve-debug");
-  if (dbg) {
-    const files = state.layoutDebug || [];
-    dbg.hidden = files.length === 0;
-    document.getElementById("resolve-debug-pre").textContent = debugReportText();
-  }
-
-  const fieldLabel = (t) => {
-    const f = SCHEMA[t.section].find((g) => g.key === t.key && !g.aliasOnly);
-    return `${SECTION_LABELS[t.section]} ${f ? f.label : t.key}`;
-  };
-  body.innerHTML = "";
-  const addRow = (name, targetText, sign, via, dim) => {
-    const v = RESOLVE_VIA[via] || RESOLVE_VIA.label;
-    body.appendChild(el("tr", { class: via === "none" ? "rv-unmatched" : "" },
-      el("td", { class: `rv-name${dim ? " rv-dim" : ""}`, text: name }),
-      el("td", { text: targetText }),
-      el("td", { class: "rv-sign", text: sign }),
-      el("td", {}, el("span", { class: `via-badge ${v.cls}`, text: v.text }))));
-  };
-  // 確認してほしい順に並べる: 認識できず → 表記ゆれ → マッピング → 組み込み
-  for (const nm of un) addRow(nm, "—(読み飛ばしました)", "", "none");
-  const order = { loose: 0, mapping: 1, skip: 1, label: 2, alias: 2 };
-  const sorted = [...items].sort((a, b) => (order[a.via] ?? 2) - (order[b.via] ?? 2));
-  for (const it of sorted) {
-    if (it.targets.length === 0) { addRow(it.name, "—(使わないと登録済み)", "", "skip"); continue; }
-    it.targets.forEach((t, i) => {
-      addRow(i === 0 ? it.name : "〃", fieldLabel(t), t.sign < 0 ? "−" : "+", it.via, i > 0);
-    });
-  }
+  dbg.hidden = files.length === 0;
+  document.getElementById("resolve-debug-pre").textContent = debugReportText();
 }
 
 /** 読み取りの診断の本文(読み取り方 + セル種類 + 名前の出どころ)。コピー共有用 */
@@ -2359,159 +2313,8 @@ function debugReportText() {
   return parts.join("\n").trim();
 }
 
-/* ---- マッピングの画面編集(書き間違い防止のプルダウン形式) ---- */
-
+/** 科目対応タブの反映先の区分(「使わない」を含む)。js/accounts.js が使う */
 const MAPPING_EDIT_SECTIONS = ["bs", "pl", "sup", "ss", "detail", MAPPING_SKIP];
-
-function mappingTargetsFor(section) {
-  return SCHEMA[section].filter((f) => !f.aliasOnly).map((f) => f.label);
-}
-
-function addMappingEditorRow(vals) {
-  const v = vals || { name: "", section: "bs", target: "", sign: 1 };
-  const rows = document.getElementById("mapping-editor-rows");
-  const row = el("div", { class: "map-row" });
-
-  const name = el("input", { type: "text", class: "map-name", placeholder: "例: 買掛金(損益分) / 11010001" });
-  name.value = v.name;
-
-  const sec = el("select", { class: "map-section", "aria-label": "反映先の区分" });
-  for (const s of MAPPING_EDIT_SECTIONS) {
-    sec.appendChild(el("option", { value: s, text: s === MAPPING_SKIP ? MAPPING_SKIP_LABEL : SECTION_LABELS[s] }));
-  }
-  sec.value = v.section;
-
-  const target = el("select", { class: "map-target", "aria-label": "反映先の科目" });
-  const fillTargets = (section, selected) => {
-    target.innerHTML = "";
-    if (section === MAPPING_SKIP) {
-      // 「使わない」は反映先を持たない(読み飛ばす)
-      target.appendChild(el("option", { value: MAPPING_SKIP, text: "(読み飛ばす)" }));
-      target.value = MAPPING_SKIP;
-      return;
-    }
-    target.appendChild(el("option", { value: "", text: "科目を選択…" }));
-    for (const label of mappingTargetsFor(section)) {
-      target.appendChild(el("option", { value: label, text: label }));
-    }
-    target.value = selected || "";
-  };
-  fillTargets(v.section, v.target);
-  sec.addEventListener("change", () => fillTargets(sec.value, ""));
-
-  const sign = el("select", { class: "map-sign", "aria-label": "符号" });
-  sign.appendChild(el("option", { value: "+", text: "+(足す)" }));
-  sign.appendChild(el("option", { value: "-", text: "−(引く)" }));
-  sign.value = v.sign < 0 ? "-" : "+";
-
-  const del = el("button", { type: "button", class: "map-del", text: "×", title: "この行を削除" });
-  del.addEventListener("click", () => row.remove());
-
-  row.append(name, sec, target, sign, del);
-  // 読み込んだデータから拾った候補の行。反映先が未選択のままなら適用時に読み飛ばす
-  if (v.suggested) { row.classList.add("map-suggested"); row.dataset.suggested = "1"; }
-  rows.appendChild(row);
-  return row;
-}
-
-/** いまのマッピング + 読み込みで認識できなかった科目を行として並べる */
-function openMappingEditor() {
-  const rows = document.getElementById("mapping-editor-rows");
-  rows.innerHTML = "";
-  if (state.mapping) {
-    for (const [k, targets] of state.mapping.entries) {
-      if (state.mapping.skipKeys.has(k)) {
-        addMappingEditorRow({ name: state.mapping.names.get(k) || k, section: MAPPING_SKIP, target: MAPPING_SKIP, sign: 1 });
-        continue;
-      }
-      for (const t of targets) {
-        const field = SCHEMA[t.section].find((f) => f.key === t.key && !f.aliasOnly);
-        addMappingEditorRow({ name: t.name, section: t.section, target: field ? field.label : "", sign: t.sign });
-      }
-    }
-  }
-  // 読み込んだデータで認識できなかった科目を、名前入り・反映先未選択の行として追加する
-  let suggested = 0;
-  for (const nm of state.unmatchedNames) {
-    if (mappingLookup(state.mapping, nm)) continue; // すでにマッピング済み
-    addMappingEditorRow({ name: nm, section: "bs", target: "", sign: 1, suggested: true });
-    suggested++;
-  }
-  const note = document.getElementById("mapping-editor-note");
-  note.hidden = suggested === 0;
-  if (suggested > 0) {
-    note.textContent = `色付きの${suggested}行は、読み込んだデータで認識できなかった科目です。` +
-      "反映先を選んで適用してください(反映先が未選択のままの行は適用されず、不要なら×で削除できます)。";
-  }
-  if (!rows.children.length) addMappingEditorRow();
-  document.getElementById("mapping-editor").hidden = false;
-}
-
-/** 編集内容をCSVにして、ファイル読み込みと同じ経路で適用する */
-function applyMappingEditor() {
-  const q = (s) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  const lines = ["科目,反映先の区分,反映先の科目,符号"];
-  const problems = [];
-  let skipped = 0;
-  document.querySelectorAll("#mapping-editor-rows .map-row").forEach((row, i) => {
-    const name = row.querySelector(".map-name").value.trim();
-    const target = row.querySelector(".map-target").value;
-    if (name === "" && target === "") return; // 何も入れていない行は無視
-    if (name === "") { problems.push(`${i + 1}行目: 科目名が空です。`); return; }
-    if (target === "") {
-      // データから拾った候補の行は、反映先を選んでいなければ「まだ決めていない」として読み飛ばす
-      if (row.dataset.suggested) { skipped++; return; }
-      problems.push(`${i + 1}行目「${name}」: 反映先の科目を選んでください。`);
-      return;
-    }
-    const section = row.querySelector(".map-section").value;
-    const sign = row.querySelector(".map-sign").value;
-    if (section === MAPPING_SKIP) { lines.push(`${q(name)},${MAPPING_SKIP_LABEL},,`); return; }
-    lines.push(`${q(name)},${SECTION_LABELS[section]},${q(target)},${sign}`);
-  });
-  if (problems.length) { mappingStatus(`適用できません: ${problems.join(" ")}`, "ng"); return; }
-  if (lines.length === 1) {
-    mappingStatus(skipped > 0
-      ? "反映先が選ばれた行がありません。候補の行の反映先を選んでから適用してください。"
-      : "行がありません。科目を1行以上入力してください。", "ng");
-    return;
-  }
-  if (!setMapping(lines.join("\r\n") + "\r\n")) return;
-  const n = state.mapping.entries.size;
-  const skipNote = skipped > 0 ? `(反映先が未選択の${skipped}行は適用していません)` : "";
-  if (state.sources.length) {
-    applySources(state.sources, { keepModalOpen: true });
-    mappingStatus(`${n}科目のマッピングを適用し、読み込み済みのデータを再計算しました。${skipNote}`, "ok");
-  } else {
-    mappingStatus(`${n}科目のマッピングを適用しました。次にCSVを読み込むと適用されます。${skipNote}`, "ok");
-  }
-  saveState();
-}
-
-function bindMappingUI() {
-  document.getElementById("btn-mapping-edit").addEventListener("click", () => {
-    const ed = document.getElementById("mapping-editor");
-    if (ed.hidden) openMappingEditor(); else ed.hidden = true;
-  });
-  document.getElementById("btn-mapping-row-add").addEventListener("click", () => addMappingEditorRow());
-  document.getElementById("btn-mapping-apply").addEventListener("click", applyMappingEditor);
-  document.getElementById("btn-mapping-edit-close").addEventListener("click", () => {
-    document.getElementById("mapping-editor").hidden = true;
-  });
-  document.getElementById("btn-mapping-template").addEventListener("click", () => {
-    downloadText("cf-mapping.csv", state.mappingText || buildMappingTemplate());
-  });
-  const input = document.getElementById("mapping-file-input");
-  document.getElementById("btn-mapping-upload").addEventListener("click", () => input.click());
-  input.addEventListener("change", () => handleMappingFile(input.files));
-  document.getElementById("btn-mapping-clear").addEventListener("click", () => {
-    setMapping("");
-    if (state.sources.length) applySources(state.sources, { keepModalOpen: true });
-    mappingStatus("マッピングを解除し、組み込みの対応に戻しました。", "");
-    saveState();
-  });
-  renderMappingStatus();
-}
 
 /* =========================================================
  * 読み込みモーダル
@@ -2588,7 +2391,6 @@ function renderShare() {
   for (const [id, show] of [
     ["btn-share-pull", connected],
     ["btn-share-push", connected],
-    ["btn-share-migrate", connected && state.sources.length > 0],
     ["btn-share-sync", connected && state.sources.length > 0],
     ["btn-share-disconnect", connected],
     ["share-auto-field", connected],
@@ -2865,11 +2667,6 @@ function bindShareUI() {
   shareEl("btn-share-pull").addEventListener("click", () => sharePull());
   shareEl("btn-share-reload").addEventListener("click", () => sharePull());
   shareEl("btn-share-push").addEventListener("click", () => sharePush());
-  shareEl("btn-share-migrate").addEventListener("click", async () => {
-    if (await sharePush({ prune: true })) {
-      shareStatus(`この端末のデータ(${state.sources.length}ファイル)を共有フォルダへ移しました。`, "ok");
-    }
-  });
   shareEl("btn-share-sync").addEventListener("click", () => sharePush({ prune: true }));
   shareEl("btn-share-disconnect").addEventListener("click", shareDisconnect);
   shareEl("btn-share-copy-path").addEventListener("click", async () => {
@@ -3237,7 +3034,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   renderTabs();
   bindSourceModal();
-  bindMappingUI();
   bindAccountsUI();
   bindShareUI();
   bindStandaloneUI();

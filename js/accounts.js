@@ -230,6 +230,7 @@ function renderAccountsPanel() {
   const edits = acctEdits();
   const all = acctSorted();
   renderAcctSummary(all);
+  document.getElementById("acct-notice").hidden = hasData();
 
   // 本体
   const tbody = table.querySelector("tbody");
@@ -519,6 +520,16 @@ function bindAccountsUI() {
     timer = setTimeout(renderAccountsPanel, 150);
   });
   document.getElementById("btn-acct-confirm-all").addEventListener("click", () => acctApply({ confirmAll: true }));
+  // 対応表のCSVでの出し入れ(手で作る・他の環境から持ってくる・Tableau などの変換表に使う)
+  document.getElementById("btn-acct-export").addEventListener("click", () => {
+    downloadText("cf-mapping.csv", state.mappingText || buildMappingTemplate());
+    acctStatus(state.mappingText
+      ? "いまの対応表を cf-mapping.csv として保存しました。"
+      : "まだ登録がないため、組み込みの対応(全別名)を cf-mapping.csv として保存しました。書き替えて読み込めます。", "ok");
+  });
+  const fileInput = document.getElementById("acct-file-input");
+  document.getElementById("btn-acct-import").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => handleMappingFile(fileInput.files));
   document.getElementById("btn-acct-apply").addEventListener("click", () => acctApply());
   document.getElementById("btn-acct-revert").addEventListener("click", () => {
     state.acctEdits = null;
