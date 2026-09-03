@@ -1411,6 +1411,27 @@ function renderDerivationList() {
   }
 }
 
+/** CF計算書以外の表示数値(指標・全社比較・推移・チェック)の算式一覧(静的) */
+function renderFigureList() {
+  const wrap = document.getElementById("figure-list");
+  if (!wrap || wrap.childElementCount > 0) return;
+  for (const section of FIGURES) {
+    const card = el("div", { class: "card deriv-card" });
+    card.append(el("h3", { text: section.title }));
+    card.append(el("p", { class: "table-hint", text: section.lead }));
+    for (const item of section.items) {
+      const row = el("div", { class: "deriv-row" });
+      const name = el("div", { class: "deriv-name" }, el("span", { text: item.label }));
+      if (item.where) name.append(el("span", { class: "figure-where", text: item.where }));
+      row.append(name);
+      row.append(el("div", { class: "figure-formula", text: item.formula }));
+      for (const n of item.notes || []) row.append(el("p", { class: "deriv-note", text: n }));
+      card.append(row);
+    }
+    wrap.append(card);
+  }
+}
+
 function renderAssumptions() {
   const wrap = document.getElementById("assumption-body");
   if (wrap.childElementCount > 0) return;
@@ -1436,6 +1457,7 @@ function renderAssumptions() {
 function renderDerivation() {
   renderDerivationPicker();
   renderDerivationList();
+  renderFigureList();
   renderAssumptions();
   renderDerivationDiagram();
   renderDerivationText();
