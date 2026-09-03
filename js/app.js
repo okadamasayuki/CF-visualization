@@ -2061,7 +2061,8 @@ function applySources(sources, { keepModalOpen = false } = {}) {
 
   for (const src of sources) {
     const result = parseFinancialCSV(src.text, baseName(src.name), state.mapping);
-    perFile.push({ file: src.name, resolved: result.resolved || [], unmatched: result.unmatched || [] });
+    perFile.push({ file: src.name, resolved: result.resolved || [], unmatched: result.unmatched || [],
+      companies: result.datasets.map((d) => d.company) });
     if (result.layoutInfo) {
       layoutCounts.set(result.layoutInfo, (layoutCounts.get(result.layoutInfo) || 0) + 1);
     }

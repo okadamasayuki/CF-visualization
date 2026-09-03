@@ -37,27 +37,22 @@ function acctKeyOf(code, name) {
  */
 function collectAccounts(perFile) {
   const map = new Map();
-  for (const { file, resolved, unmatched } of perFile) {
-    for (const r of resolved || []) {
-      const key = acctKeyOf(r.code, r.name);
+  // 対応表は会社に依存しない(科目コード、無ければ科目名で同一視する)。
+  // 会社ごとに使う科目が違っても、全社に出てきた科目の和集合が1つの表になる。
+  for (const { file, resolved, unmatched, companies } of perFile) {
+    const add = (rec, via, targets) => {
+      const key = acctKeyOf(rec.code, rec.name);
       if (!map.has(key)) {
-        map.set(key, { key, code: r.code || "", name: r.name, names: new Set([r.name]),
-          via: r.via, targets: r.targets.map((t) => ({ ...t })), files: new Set() });
+        map.set(key, { key, code: rec.code || "", name: rec.name, names: new Set([rec.name]),
+          via, targets, files: new Set(), companies: new Set() });
       }
       const a = map.get(key);
-      a.names.add(r.name);
+      a.names.add(rec.name);
       a.files.add(file);
-    }
-    for (const u of unmatched || []) {
-      const key = acctKeyOf(u.code, u.name);
-      if (!map.has(key)) {
-        map.set(key, { key, code: u.code || "", name: u.name, names: new Set([u.name]),
-          via: "none", targets: [], files: new Set() });
-      }
-      const a = map.get(key);
-      a.names.add(u.name);
-      a.files.add(file);
-    }
+      for (const c of companies || []) a.companies.add(c);
+    };
+    for (const r of resolved || []) add(r, r.via, r.targets.map((t) => ({ ...t })));
+    for (const u of unmatched || []) add(u, "none", []);
   }
   return [...map.values()];
 }
@@ -223,7 +218,8 @@ function acctFilterFn() {
   return (a) => {
     if (filter === "changed" && !acctChanged(a)) return false;
     if (filter !== "all" && filter !== "changed" && acctBaseGroup(a) !== filter) return false;
-    if (q && !mappingKey(a.code).includes(q) && ![...a.names].some((n) => mappingKey(n).includes(q))) return false;
+    if (q && !mappingKey(a.code).includes(q) && ![...a.names].some((n) => mappingKey(n).includes(q))
+      && ![...a.companies].some((c) => mappingKey(c).includes(q))) return false;
     return true;
   };
 }
@@ -321,7 +317,8 @@ function acctRows(a, e) {
         el("td", { class: "name", rowspan: n },
           el("span", { text: a.name }),
           extra ? el("span", { class: "acct-sub", text: extra }) : ""),
-        el("td", { class: "num", rowspan: n, text: String(a.files.size) }),
+        el("td", { class: "num", rowspan: n, text: `${a.companies.size}社`,
+          title: `${[...a.companies].slice(0, 40).join("、")}${a.companies.size > 40 ? " ほか" : ""}(${a.files.size}ファイル)` }),
         el("td", { rowspan: n }, acctStateBadge(a, e)),
       );
     }
