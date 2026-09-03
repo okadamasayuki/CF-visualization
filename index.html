@@ -42,6 +42,8 @@
               aria-controls="panel-summary" aria-selected="true" tabindex="0">サマリー</button>
       <button type="button" class="tab" role="tab" id="tab-overview" data-tab="overview"
               aria-controls="panel-overview" aria-selected="false" tabindex="-1">全社比較</button>
+      <button type="button" class="tab" role="tab" id="tab-accounts" data-tab="accounts"
+              aria-controls="panel-accounts" aria-selected="false" tabindex="-1">科目対応</button>
       <button type="button" class="tab" role="tab" id="tab-detail" data-tab="detail"
               aria-controls="panel-detail" aria-selected="false" tabindex="-1">詳細入力</button>
       <button type="button" class="tab" role="tab" id="tab-logic" data-tab="logic"
@@ -160,7 +162,59 @@
       </div>
     </section>
 
-    <!-- ===== 算定ロジック ===== -->
+    <!-- ===== 科目対応 ===== -->
+    <section id="panel-accounts" class="panel" role="tabpanel" aria-labelledby="tab-accounts" tabindex="0" hidden>
+      <div class="card">
+        <div class="chart-head">
+          <h3>読み込んだ科目の対応表 <span id="acct-count" class="count-badge"></span></h3>
+          <div class="acct-filters">
+            <label class="field">表示
+              <select id="acct-filter"></select>
+            </label>
+            <input type="search" id="acct-search" class="acct-search" placeholder="科目名・コードで絞り込み" aria-label="科目名・コードで絞り込み">
+          </div>
+        </div>
+        <p class="table-hint">
+          読み込んだファイルに出てきた科目を全部並べ、それぞれを<strong>どの項目に、足す(+)か引く(−)か</strong>で登録します。
+          名前から自動で判定できた科目も、ここで確定(登録)しておくと、以後は名前の揺れに左右されず必ずこの表のとおりに読み込みます。
+          右端の列は、その結果 <strong>CF計算書のどの行が増える(+)/減る(−)か</strong>と、どの財務指標に使われるかです。
+          合計行など不要な科目は「使わない」にすると読み飛ばします(認識できずの警告も出なくなります)。
+        </p>
+        <div class="acct-summary" id="acct-summary"></div>
+        <div class="toolbar">
+          <button id="btn-acct-confirm-all" type="button" class="btn btn-secondary">自動判定をすべて確定して登録</button>
+          <button id="btn-acct-apply" type="button" class="btn">変更を適用</button>
+          <button id="btn-acct-revert" type="button" class="btn btn-ghost" hidden>変更を取り消す</button>
+          <button id="btn-acct-clear" type="button" class="btn btn-ghost" hidden>登録をすべて解除(自動判定に戻す)</button>
+        </div>
+        <p id="acct-status" class="file-status" hidden></p>
+        <div class="table-scroll acct-scroll">
+          <table class="acct-table" id="acct-table">
+            <thead>
+              <tr>
+                <th>科目コード</th><th>科目名(ファイルの表記)</th><th class="num">ファイル数</th><th>いまの読み方</th>
+                <th>反映先(区分 / 科目 / 符号)</th><th>CF計算書・指標への影響</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="acct-empty" class="hint" hidden>この条件に当たる科目はありません。</p>
+        </div>
+        <details class="format-help">
+          <summary>符号の考え方と、登録の保存先</summary>
+          <ul>
+            <li><strong>符号</strong>は、その科目の金額を反映先の項目に足す(+)か引く(−)かです。残高試算表の金額は借方・貸方どちらも正の残高で入っているので、通常は + のままでよく、
+              控除科目(減価償却累計額・貸倒引当金など)を純額の項目に反映するときだけ − にします。</li>
+            <li>右端の「影響」は、算定ロジックの対応表を逆引きしたものです。たとえば営業債権に + で登録した科目は、金額が増えると「営業債権の増減」の行が減る(−)ため、そのように表示します。</li>
+            <li>同じ科目を複数の項目へ同時に反映することもできます(「+ 反映先を追加」)。PLに税引前当期純利益の行がない元帳形式で、収益・費用の各行を税引前当期純利益にも集計する場合に使います。</li>
+            <li>登録した内容は科目マッピング(<code>mapping.csv</code>)として保存され、この端末のブラウザ・共有フォルダ・配布用ZIPに含まれます。
+              CSVでの出し入れや行の追加は、「読み込み」画面の「科目マッピング」からもできます(同じ対応表です)。</li>
+            <li>科目コードのあるファイルはコードで登録し、科目名はメモ欄に控えます。コードが同じなら名前の表記が変わっても同じ科目として読みます。</li>
+          </ul>
+        </details>
+      </div>
+    </section>
+
     <!-- ===== 詳細入力 ===== -->
     <section id="panel-detail" class="panel" role="tabpanel" aria-labelledby="tab-detail" tabindex="0" hidden>
       <div class="missing-notice" id="detail-missing" hidden>
@@ -431,6 +485,7 @@
           CF計算書・財務指標・全社比較のすべてに反映されます。
           「マッピングを画面で編集」なら、区分を選ぶとその区分の項目だけが選択肢に出るので、書き間違いなく作れます。
           CSVで作る場合は「現在の算定ロジックをダウンロード」で今の対応表を取り出し、科目名を書き替えて読み込ませてください。
+          データを読み込んだ後は、<strong>「科目対応」タブ</strong>で読み込んだ全科目を一覧しながら登録するのが最も確実です(同じ対応表に保存されます)。
         </p>
         <div class="toolbar">
           <button id="btn-mapping-edit" type="button" class="btn">マッピングを画面で編集</button>
@@ -468,7 +523,9 @@
           <ul>
             <li><strong>同じ科目を複数行書くと、複数の項目へ同時に反映されます。</strong>PLに税引前当期純利益の行がない場合は、収益の各行を「税引前当期純利益 +」、費用の各行を「税引前当期純利益 −」にも割り当ててください(法人税等の行は除く)。</li>
             <li><strong>科目は名前でなくてもかまいません。</strong><code>11010001</code> のような勘定科目コード(数字の羅列)をそのまま書けます。データCSVに「科目コード」の列があればコードで照合し、Excelで先頭の0が消えていても同じコードとして扱います。</li>
-            <li>反映先の区分は <code>BS</code> / <code>PL</code> / <code>SS</code> / <code>補足</code> / <code>詳細</code>、反映先の科目はテンプレートCSVにある正式名です。</li>
+            <li>反映先の区分は <code>BS</code> / <code>PL</code> / <code>SS</code> / <code>補足</code> / <code>詳細</code>、反映先の科目はテンプレートCSVにある正式名です。
+              区分に <code>使わない</code> と書くと、その科目は読み飛ばします(反映先の科目・符号は空欄)。</li>
+            <li>5列目に<code>メモ</code>(任意)を書けます。科目コードで登録したときに科目名を控えておく用途で、読み込みには使いません。</li>
             <li>符号は <code>+</code>(足す)か <code>-</code>(引く)。減価償却累計額や貸倒引当金のような控除科目は <code>-</code> にします。</li>
             <li>マッピングに書いた科目はその指定どおりに、書いていない科目はこれまで通り組み込みの対応で取り込みます。</li>
             <li>共有フォルダに接続していれば <code>mapping.csv</code> として保存され、全員に同じマッピングが適用されます。</li>
@@ -566,6 +623,7 @@
 <script src="js/samples.js?v=__BUILD__"></script>
 <script src="js/tb.js?v=__BUILD__"></script>
 <script src="js/zip.js?v=__BUILD__"></script>
+<script src="js/accounts.js?v=__BUILD__"></script>
 <script src="js/app.js?v=__BUILD__"></script>
 <!-- 最後に読み込む(この時点の素のHTMLを「ツール本体の保存」に使う) -->
 <script src="js/standalone.js?v=__BUILD__"></script>

@@ -46,6 +46,9 @@ const state = {
   overrides: {},          // 画面で手入力した詳細情報(ファイルに残らないので別途保存)
   mappingText: "",        // 科目マッピングCSVの原文(保存・共有用)
   mapping: null,          // parseMappingCSV の結果(entries)
+  accounts: [],           // 読み込んだファイルに出てきた科目の一覧(科目対応タブ)
+  acctEdits: null,        // 科目対応タブの編集中の状態(null なら現在のマッピングから起こす)
+  acctInitial: null,
   unmatchedNames: [],     // 読み込みで認識できなかった科目(マッピング編集の候補)
   resolvedNames: [],      // 読み込みで各科目をどう解釈したかの記録(読み込み内訳)
   layoutNotes: [],        // 各ファイルをどう読んだか(読み取り方)の記録
@@ -1750,6 +1753,7 @@ const TABS = [
   // CF計算書・財務指標・推移は1つの画面にまとめている
   { id: "summary", needs: hasData },
   { id: "overview", needs: () => hasData() && state.companies.length > 1 },
+  { id: "accounts", needs: hasData },
   { id: "detail", needs: hasData },
   { id: "logic", needs: hasData },
 ];
@@ -1777,6 +1781,7 @@ function selectTab(id) {
   if (id === "overview") { renderOverviewChart(); renderOverviewCards(); }
   if (id === "logic") renderDerivation();
   if (id === "detail") renderDetailPanel();
+  if (id === "accounts") renderAccountsPanel();
 }
 
 function renderTabs() {
@@ -1902,6 +1907,7 @@ function renderAll() {
 
   if (state.tab === "logic") { renderDerivationDiagram(); renderDerivationText(); }
   if (state.tab === "detail") renderDetailPanel();
+  if (state.tab === "accounts") renderAccountsPanel();
   renderTabs();
   renderShareBanner();
 }
@@ -2029,9 +2035,11 @@ function applySources(sources, { keepModalOpen = false } = {}) {
   const layoutCounts = new Map();
 
   const layoutDebug = [];
+  const perFile = []; // 科目対応タブ用(ファイルごとの解釈結果)
 
   for (const src of sources) {
     const result = parseFinancialCSV(src.text, baseName(src.name), state.mapping);
+    perFile.push({ file: src.name, resolved: result.resolved || [], unmatched: result.unmatched || [] });
     if (result.layoutInfo) {
       layoutCounts.set(result.layoutInfo, (layoutCounts.get(result.layoutInfo) || 0) + 1);
     }
@@ -2075,6 +2083,8 @@ function applySources(sources, { keepModalOpen = false } = {}) {
 
   state.unmatchedNames = [...unmatchedNames.values()];
   state.resolvedNames = [...resolvedNames.values()];
+  state.accounts = collectAccounts(perFile);
+  state.acctEdits = null;
   state.layoutNotes = [...layoutCounts].map(([desc, n]) =>
     sources.length > 1 ? `${desc} × ${n}ファイル` : desc);
   state.layoutDebug = layoutDebug;
@@ -2166,6 +2176,8 @@ function clearAll() {
   state.resolvedNames = [];
   state.layoutNotes = [];
   state.layoutDebug = [];
+  state.accounts = [];
+  state.acctEdits = null;
   renderResolveReport();
   document.getElementById("file-input").value = "";
   document.getElementById("file-status").hidden = true;
@@ -2198,6 +2210,7 @@ function mappingStatus(text, kind = "") {
 
 /** マッピングを差し替えて、読み込み済みデータがあれば再計算する */
 function setMapping(text, { quiet = false } = {}) {
+  state.acctEdits = null;
   if (!text) {
     state.mappingText = "";
     state.mapping = null;
@@ -2253,6 +2266,7 @@ const RESOLVE_VIA = {
   alias: { text: "組み込み(別名)", cls: "via-exact" },
   loose: { text: "表記ゆれを吸収", cls: "via-loose" },
   mapping: { text: "マッピング", cls: "via-mapping" },
+  skip: { text: "使わない(登録)", cls: "via-mapping" },
   none: { text: "認識できず", cls: "via-none" },
 };
 
@@ -2297,9 +2311,10 @@ function renderResolveReport() {
   };
   // 確認してほしい順に並べる: 認識できず → 表記ゆれ → マッピング → 組み込み
   for (const nm of un) addRow(nm, "—(読み飛ばしました)", "", "none");
-  const order = { loose: 0, mapping: 1, label: 2, alias: 2 };
+  const order = { loose: 0, mapping: 1, skip: 1, label: 2, alias: 2 };
   const sorted = [...items].sort((a, b) => (order[a.via] ?? 2) - (order[b.via] ?? 2));
   for (const it of sorted) {
+    if (it.targets.length === 0) { addRow(it.name, "—(使わないと登録済み)", "", "skip"); continue; }
     it.targets.forEach((t, i) => {
       addRow(i === 0 ? it.name : "〃", fieldLabel(t), t.sign < 0 ? "−" : "+", it.via, i > 0);
     });
@@ -2323,7 +2338,7 @@ function debugReportText() {
 
 /* ---- マッピングの画面編集(書き間違い防止のプルダウン形式) ---- */
 
-const MAPPING_EDIT_SECTIONS = ["bs", "pl", "sup", "ss", "detail"];
+const MAPPING_EDIT_SECTIONS = ["bs", "pl", "sup", "ss", "detail", MAPPING_SKIP];
 
 function mappingTargetsFor(section) {
   return SCHEMA[section].filter((f) => !f.aliasOnly).map((f) => f.label);
@@ -2338,12 +2353,20 @@ function addMappingEditorRow(vals) {
   name.value = v.name;
 
   const sec = el("select", { class: "map-section", "aria-label": "反映先の区分" });
-  for (const s of MAPPING_EDIT_SECTIONS) sec.appendChild(el("option", { value: s, text: SECTION_LABELS[s] }));
+  for (const s of MAPPING_EDIT_SECTIONS) {
+    sec.appendChild(el("option", { value: s, text: s === MAPPING_SKIP ? MAPPING_SKIP_LABEL : SECTION_LABELS[s] }));
+  }
   sec.value = v.section;
 
   const target = el("select", { class: "map-target", "aria-label": "反映先の科目" });
   const fillTargets = (section, selected) => {
     target.innerHTML = "";
+    if (section === MAPPING_SKIP) {
+      // 「使わない」は反映先を持たない(読み飛ばす)
+      target.appendChild(el("option", { value: MAPPING_SKIP, text: "(読み飛ばす)" }));
+      target.value = MAPPING_SKIP;
+      return;
+    }
     target.appendChild(el("option", { value: "", text: "科目を選択…" }));
     for (const label of mappingTargetsFor(section)) {
       target.appendChild(el("option", { value: label, text: label }));
@@ -2373,7 +2396,11 @@ function openMappingEditor() {
   const rows = document.getElementById("mapping-editor-rows");
   rows.innerHTML = "";
   if (state.mapping) {
-    for (const targets of state.mapping.entries.values()) {
+    for (const [k, targets] of state.mapping.entries) {
+      if (state.mapping.skipKeys.has(k)) {
+        addMappingEditorRow({ name: state.mapping.names.get(k) || k, section: MAPPING_SKIP, target: MAPPING_SKIP, sign: 1 });
+        continue;
+      }
       for (const t of targets) {
         const field = SCHEMA[t.section].find((f) => f.key === t.key && !f.aliasOnly);
         addMappingEditorRow({ name: t.name, section: t.section, target: field ? field.label : "", sign: t.sign });
@@ -2416,6 +2443,7 @@ function applyMappingEditor() {
     }
     const section = row.querySelector(".map-section").value;
     const sign = row.querySelector(".map-sign").value;
+    if (section === MAPPING_SKIP) { lines.push(`${q(name)},${MAPPING_SKIP_LABEL},,`); return; }
     lines.push(`${q(name)},${SECTION_LABELS[section]},${q(target)},${sign}`);
   });
   if (problems.length) { mappingStatus(`適用できません: ${problems.join(" ")}`, "ng"); return; }
@@ -3187,6 +3215,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderTabs();
   bindSourceModal();
   bindMappingUI();
+  bindAccountsUI();
   bindShareUI();
   bindStandaloneUI();
   // まだ何も読み込まれていなければ、読み込み画面を開いた状態で始める

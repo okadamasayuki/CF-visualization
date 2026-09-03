@@ -824,6 +824,84 @@ tr.rv-unmatched td { color: var(--bad); }
   .map-row .map-target { grid-column: 1 / 2; }
 }
 
+/* ---- 科目対応タブ ---- */
+.acct-filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.acct-search {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 10px;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  width: 220px;
+}
+.acct-search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.acct-summary { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.acct-chip {
+  font: inherit;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--grid);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.acct-chip:hover { border-color: var(--accent); }
+.acct-chip.on { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+.acct-chip-none { color: var(--bad); }
+.acct-chip-loose { color: var(--warn); }
+.acct-chip-changed { color: var(--accent); }
+.acct-scroll { margin-top: 12px; max-height: 70vh; overflow: auto; }
+.acct-table { border-collapse: collapse; font-size: 12.5px; width: 100%; min-width: 1040px; }
+.acct-table th, .acct-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--grid);
+  text-align: left;
+  vertical-align: top;
+}
+.acct-table thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 11.5px;
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+  z-index: 1;
+}
+.acct-table th.num, .acct-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.acct-table td.code { font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
+.acct-table td.name { min-width: 160px; }
+.acct-table td.name span { display: block; }
+.acct-sub { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.acct-state { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.acct-target-cell { min-width: 420px; }
+.acct-target {
+  display: grid;
+  grid-template-columns: 128px minmax(170px, 1fr) 88px 26px;
+  gap: 6px;
+  align-items: center;
+}
+.acct-target select { max-width: none; font-size: 12.5px; padding: 3px 6px; width: 100%; min-width: 0; }
+.acct-target .map-del { padding: 2px 0; }
+.acct-add { display: inline-block; margin-top: 6px; font-size: 12px; }
+.acct-effects { display: flex; flex-wrap: wrap; gap: 4px; max-width: 320px; }
+.effect {
+  font-size: 11px;
+  border: 1px solid var(--grid);
+  border-radius: 999px;
+  padding: 0 8px;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.effect.plus { color: var(--good); border-color: var(--good); }
+.effect.minus { color: var(--bad); border-color: var(--bad); }
+.effect.metric { border-style: dashed; }
+tr.acct-changed td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.acct-none td.name { color: var(--bad); }
+#panel-accounts .toolbar { margin-top: 12px; }
+
 .build-id { margin-left: 10px; color: var(--text-muted); font-size: 11px; }
 
 .share-locate { margin: 0 0 10px; }

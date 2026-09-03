@@ -669,7 +669,7 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
       recognized++;
       const rkey = mappingKey(rawName);
       if (!resolved.has(rkey)) {
-        resolved.set(rkey, { name: rawName, via: "mapping",
+        resolved.set(rkey, { name: rawName, code: rawCode, via: mapped.length ? "mapping" : "skip",
           targets: mapped.map((t) => ({ section: t.section, key: t.key, sign: t.sign })) });
       }
       let usedM = false;
@@ -707,13 +707,13 @@ function parseFinancialCSV(text, defaultCompany = "対象会社", mapping = null
     if (!target) {
       // 合計行など、金額のない見出し行はそっと無視する
       const hasAmount = [cols.prev, cols.curr].some((c) => c !== null && isAmountLike(row[c]));
-      if (hasAmount) unmatched.push({ line: lineNo, name: rawName, src: nameSrc });
+      if (hasAmount) unmatched.push({ line: lineNo, name: rawName, code: rawCode, src: nameSrc });
       continue;
     }
     recognized++;
     const rkey = mappingKey(rawName);
     if (!resolved.has(rkey)) {
-      resolved.set(rkey, { name: rawName, via: target.matchKind || "label",
+      resolved.set(rkey, { name: rawName, code: rawCode, via: target.matchKind || "label",
         targets: [{ section: target.section, key: target.key, sign: target.negate ? -1 : 1 }] });
     }
 
